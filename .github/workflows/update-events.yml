@@ -32,8 +32,11 @@ jobs:
         with:
           path: site
 
+  # Publishing is switched off until the repository is public and Pages is on: then add the
+  # repository variable PUBLISH_PAGES = true (Settings > Secrets and variables > Actions > Variables).
   deploy:
     needs: build
+    if: vars.PUBLISH_PAGES == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

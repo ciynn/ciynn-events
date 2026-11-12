@@ -30,8 +30,13 @@ event's own page, plus `events.csv` and `events.json`. The page layout is in `te
 
 `.github/workflows/update-events.yml` re-runs the scraper every Monday at 06:00 UTC (and on
 every push, or by hand from the Actions tab) and publishes `site/` to GitHub Pages.
-To switch it on once the repository is public: Settings → Pages → Source: **GitHub Actions**,
-then run the workflow once. The page appears at `https://<user>.github.io/<repository>/`.
+Publishing is off until you switch it on. Once the repository is public:
+1. Settings → Pages → Source: **GitHub Actions**.
+2. Settings → Secrets and variables → Actions → Variables: add `PUBLISH_PAGES` = `true`.
+3. Actions → Update events page → **Run workflow**.
+
+The page then appears at `https://<user>.github.io/<repository>/`. Until then the weekly run
+still builds the page (a check that every source still works) but doesn't publish it.
 
 ## How it behaves
 
