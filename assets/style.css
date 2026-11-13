@@ -330,3 +330,21 @@ tbody th small { display: block; font: 400 .85rem var(--sans); color: var(--mute
 .paper { display: grid; gap: 6px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 
 .learned { font-style: italic; color: var(--muted); }
+
+/* members' area */
+.members { display: grid; gap: 24px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 2px solid var(--line); margin-bottom: 22px; }
+.tabs button { font: 600 .98rem var(--sans); color: var(--muted); background: none; border: 0; border-bottom: 3px solid transparent;
+  margin-bottom: -2px; padding: 10px 14px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--gold); }
+.auth { max-width: 520px; }
+.auth .field { margin: 0; }
+.member-form { max-width: 900px; }
+.member-form h3 { margin-top: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.why-field { color: var(--muted); font-size: .85rem; }
+.form-msg { padding: 10px 14px; border-radius: 4px; background: var(--chip); border-left: 4px solid var(--gold); }
+.form-msg.bad { border-left-color: #B2445A; }
+.member-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.account { display: grid; gap: 22px; }
+.danger { border-color: #B2445A; }
+.mailform input:disabled, .mailform textarea:disabled { opacity: .55; }

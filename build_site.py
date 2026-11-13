@@ -170,7 +170,7 @@ TRAIL = '<span class="trail" aria-hidden="true"><i></i><i></i><i></i><i></i></sp
 
 NAV = [("index.html", "Home"), ("events.html", "Events"), ("conferences.html", "Conferences"),
        ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"),
-       ("partners.html", "Work with us"), ("research.html", "Research"), ("about.html", "About"), ("for-you.html", "For you")]
+       ("partners.html", "Work with us"), ("research.html", "Research"), ("about.html", "About"), ("members.html", "Members")]
 
 sys.path.insert(0, str(HERE))
 import geomap  # noqa: E402  (the conference map)
@@ -192,6 +192,10 @@ def email_block(label="Email us") -> str:
     e = esc(CFG["email"])
     return (f'<p class="copy"><span>{label}:</span> <a href="mailto:{e}"><code>{e}</code></a>'
             f'<button type="button" data-copy="{e}">Copy</button></p>')
+
+
+def accounts_on() -> bool:
+    return CFG.get("supabase_url", "").startswith("https://") and bool(CFG.get("supabase_anon_key"))
 
 
 def mail_form(fid: str, subject: str, subject_field: str, fields: list, send: str, note: str = "") -> str:
@@ -286,12 +290,16 @@ ARTICLE_FIELDS = [
 ]
 
 
-def layout(path: str, title: str, body: str, description: str, current: str = "", head_extra="") -> str:
+def layout(path: str, title: str, body: str, description: str, current: str = "", head_extra="", csp: str = "") -> str:
+    csp = csp or CSP
     depth = path.count("/")
     root = "../" * depth
     links = "".join(
         f'<a href="{root}{href}"{" aria-current=\"page\"" if href == current else ""}>{label}</a>'
-        for href, label in NAV[1:])
+        for href, label in NAV[1:]
+        if not (href == "research.html" and not CFG.get("research_open"))          # hidden while locked
+        and not (href == "members.html" and accounts_on()))                        # then it's the gold button
+    join_href, join_label = ("members.html", "Join or sign in") if accounts_on() else ("join.html", "Join the network")
     full_title = f"{title} | {CFG['name']}" if title != CFG["name"] else title
     canonical = CFG["base_url"] + ("" if path == "index.html" else path)
     return f"""<!DOCTYPE html>
@@ -299,7 +307,7 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="{CSP}">
+<meta http-equiv="Content-Security-Policy" content="{csp}">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>{esc(full_title)}</title>
 <meta name="description" content="{esc(description)}">
@@ -322,7 +330,7 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
   <div class="wrap">
     <a class="lockup" href="{root}index.html" aria-label="{esc(CFG['name'])}: home">{LOGO}<div><b>CHADWICK</b><span>YOUNG NUCLEAR NETWORK</span></div></a>
     <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
-    <nav class="nav" id="nav" aria-label="Main">{links}<a class="join" href="{root}join.html"{' aria-current="page"' if current == "join.html" else ""}>Join the network</a></nav>
+    <nav class="nav" id="nav" aria-label="Main">{links}<a class="join" href="{root}{join_href}"{' aria-current="page"' if current == join_href else ""}>{join_label}</a></nav>
   </div>
 </header>
 <main id="main">
@@ -813,6 +821,9 @@ def build(scraped: list[dict], errors: dict):
 </div></div></section>"""
     write("research.html", layout("research.html", "Research", rs, "Papers, reports and projects by members of the Chadwick Institute Young Nuclear Network.", "research.html"))
 
+    # ---- members' area (Supabase). Without supabase_url and supabase_anon_key in site.json it says it opens soon.
+    write("members.html", members_page())
+
     # ---- privacy and 404
     pv = page_head("Privacy")
     pv += f"""<section class="section"><div class="wrap"><div class="prose">
@@ -825,6 +836,15 @@ def build(scraped: list[dict], errors: dict):
     storage), on that device only, so the site can show suggestions. If you also tick "learn from what I open", the
     browser counts which subjects you open, again only on your device. None of it is sent to us or anyone else, and
     "Forget me" deletes it. If you never use the page, nothing is stored.</p>
+  <h2 id="members">Member accounts</h2>
+  <p>If you create a free account, your account and profile are stored with Supabase, in its London data centre, on the
+    network's behalf. Supabase checks your password and keeps only a secure (salted, hashed) version of it; nobody,
+    including the committee, can see your password. Your name, username and email are needed to run your account;
+    everything else in your profile is optional, and each field says what it's used for. Dietary and access needs are
+    kept only if you tick the box that allows it. Other members see you in the directory only if you choose to be listed,
+    and then only the details listed there. The committee can see member profiles in order to run the network, and never
+    shares them with partners or anyone else. You can download your data or delete your account at any time from the
+    Account tab; deleting it removes your profile straight away. Accounts unused for three years are deleted.</p>
   <h2>Signing up</h2>
   <p>The forms on this website don't send or store anything themselves: pressing the button opens your own
     email app with a message to the network's mailbox, and nothing reaches us until you send it. We ask only for what
@@ -928,6 +948,176 @@ def build(scraped: list[dict], errors: dict):
           f"{len(news)} news, {len(articles)} articles, {len(opps)} opportunities -> {OUT}")
     if errors:
         print("Sources with errors (their items are missing this week):", ", ".join(errors))
+
+
+SUPABASE_JS = ("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js",
+               "sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o")
+
+
+def members_page() -> str:
+    url, key = CFG.get("supabase_url", "").rstrip("/"), CFG.get("supabase_anon_key", "")
+    head = page_head("Members", "Free membership: your profile, suggestions picked for you, member exclusives and the members' directory.")
+    if not (url.startswith("https://") and key):
+        body = head + """<section class="section"><div class="wrap"><div class="locked">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h1Zm2 0h6V7a3 3 0 0 0-6 0v3Z"/></svg>
+  <div><h2>Member accounts are coming soon</h2><p>Soon you'll be able to create a free account, keep your profile and choices,
+    and see member exclusives. Until then, you can still pick your interests on the <a href="for-you.html">For you</a> page
+    (kept in your browser) and join our mailing list.</p>
+  <div class="actions"><a class="btn btn-navy" href="join.html">Join the mailing list</a><a class="btn btn-line" href="for-you.html">For you</a></div></div>
+</div></div></section>"""
+        return layout("members.html", "Members", body, "The members' area of the Chadwick Institute Young Nuclear Network.", "members.html")
+
+    def boxes(name, options):
+        return "".join(f'<label><input type="checkbox" name="{name}" value="{esc(v)}" data-list> {esc(l)}</label>' for v, l in options)
+    interests = [(FIELD_KEYS[f], f) for f, _ in FIELDS] + [("careers", "Careers and skills")]
+    bodies = [(b, b) for b in ["Nuclear Institute", "Society for Radiological Protection", "Institute of Physics",
+                               "IPEM", "British Nuclear Medicine Society", "Women in Nuclear UK", "Other"]]
+    updates = [("events", "Our events"), ("digest", "The weekly events digest"), ("conferences", "Conferences and calls for abstracts"),
+               ("opportunities", "PhDs, jobs and placements"), ("news", "News")]
+    def field(name, label, purpose, kind="text", attrs="", options=None, wide=False):
+        cls = "field wide" if wide else "field"
+        if kind == "select":
+            opts = '<option value="">Rather not say</option>' + "".join(f'<option value="{v}">{esc(l)}</option>' for v, l in options)
+            ctl = f'<select name="{name}" {attrs}>{opts}</select>'
+        elif kind == "area":
+            ctl = f'<textarea name="{name}" rows="3" {attrs}></textarea>'
+        else:
+            ctl = f'<input name="{name}" type="{kind}" {attrs}>'
+        return f'<label class="{cls}"><span>{esc(label)}</span>{ctl}<small class="why-field">{esc(purpose)}</small></label>'
+
+    STATUS = [("undergraduate", "Undergraduate"), ("msc", "MSc student"), ("pgr", "PhD, MPhil or MRes student"), ("postdoc", "Postdoc or researcher"),
+              ("staff", "University staff"), ("industry", "Working in industry"), ("other", "Other")]
+    profile_form = f"""<form class="mailform member-form" data-profile novalidate>
+  <h3>About you</h3><div class="grid">
+    {field("full_name", "Full name", "Shown on your account and, if you choose, in the directory.", attrs='maxlength="120" autocomplete="name" required')}
+    {field("username", "Username", "Fixed once chosen.", attrs='disabled')}
+    {field("pronouns", "Pronouns (optional)", "So we get them right.", attrs='maxlength="30"')}
+  </div>
+  <h3>Study and work</h3><div class="grid">
+    {field("status", "I am", "So we can suggest events at the right level.", "select", options=STATUS)}
+    {field("department", "Department", "So we know which departments we reach.", attrs='maxlength="120"')}
+    {field("organisation", "Organisation, if not the University", "For members from industry and elsewhere.", attrs='maxlength="120" autocomplete="organization"')}
+    {field("year_of_study", "Year of study", "For year-specific events, such as first-year PhD sessions.", attrs='maxlength="30"')}
+    {field("group_or_supervisor", "Research group or supervisor", "So we can connect people in related groups.", attrs='maxlength="120"')}
+    {field("expected_finish", "Expected to finish", "So we can share jobs and fellowships at the right time.", attrs='maxlength="30" placeholder="e.g. September 2029"')}
+  </div>
+  <h3>Research and interests</h3><div class="grid">
+    {field("research_area", "Research area", "To suggest talks and connect you with people working on similar things.", attrs='maxlength="200"', wide=True)}
+    {field("bio", "A short bio", "Shown in the directory if you choose to be listed.", "area", attrs='maxlength="1200"', wide=True)}
+  </div>
+  <fieldset class="field"><legend>I'm interested in</legend><div class="boxes">{boxes("interests", interests)}</div>
+    <small class="why-field">These choose your suggestions on this site.</small></fieldset>
+  <div class="grid">
+    {field("travel", "I'd travel to", "Suggestions only include places you'd go.", "select", options=[("anywhere", "Anywhere"), ("europe", "The UK and Europe"), ("uk", "The UK only"), ("online", "Online only")])}
+    {field("orcid", "ORCID iD", "To link your publications.", attrs='pattern="\\d{{4}}-\\d{{4}}-\\d{{4}}-\\d{{3}}[\\dX]" placeholder="0000-0000-0000-0000"')}
+    {field("linkedin", "LinkedIn profile", "Shown in the directory if you choose to be listed.", "url", attrs='placeholder="https://www.linkedin.com/in/..."')}
+    {field("website", "Website", "Your group or personal page.", "url", attrs='placeholder="https://..."')}
+  </div>
+  <label class="agree wide"><input type="checkbox" name="learn_toggle"> <span>Learn from what I open on this site to improve my
+    suggestions (the model runs in your browser and is saved to your account)</span></label>
+  <h3>Mentoring and skills</h3><div class="grid">
+    {field("skills", "Skills and expertise", "Separate with commas. For mentoring and for finding speakers.", attrs='data-csv placeholder="e.g. Geant4, gamma spectroscopy, Python"', wide=True)}
+    {field("mentoring", "Mentoring", "For our mentor matching scheme.", "select", options=[("none", "Not for now"), ("want", "I'd like a mentor"), ("offer", "I'm happy to mentor someone"), ("both", "Both")])}
+    {field("career_goals", "Career goals", "So we can suggest the right opportunities and mentors.", "area", attrs='maxlength="800"', wide=True)}
+  </div>
+  <fieldset class="field"><legend>Professional bodies I belong to</legend><div class="boxes">{boxes("professional_bodies", bodies)}</div>
+    <small class="why-field">So we know which partnerships matter to members.</small></fieldset>
+  <h3>Events and emails</h3>
+  <fieldset class="field"><legend>Email me about</legend><div class="boxes">{boxes("email_updates", updates)}</div>
+    <small class="why-field">You can change this at any time.</small></fieldset>
+  <div class="grid">{field("heard_about_us", "How did you hear about us?", "So we know which publicity works.", attrs='maxlength="120"')}</div>
+  <label class="agree wide"><input type="checkbox" name="needs_consent"> <span>I'm happy for the committee to keep my dietary and
+    access needs, to plan events. (This can reveal health or beliefs, so we only keep it with your say-so, and delete it if you untick this.)</span></label>
+  <div class="grid">
+    {field("dietary", "Dietary needs", "For catering at events.", attrs='maxlength="300" data-needs')}
+    {field("accessibility", "Access needs", "So every event works for you.", attrs='maxlength="500" data-needs')}
+  </div>
+  <h3>Directory</h3>
+  <label class="agree wide"><input type="checkbox" name="in_directory"> <span>List me in the members' directory, so other
+    members can see my name, pronouns, status, department, research area, skills, mentoring choice, LinkedIn and ORCID.</span></label>
+  <div class="actions"><button class="btn btn-navy" type="submit">Save my profile</button></div>
+  <p class="form-msg hidden" role="status" data-msg></p>
+</form>"""
+
+    body = head + f"""
+<section class="section"><div class="wrap members" data-members data-url="{esc(url)}" data-key="{esc(key)}">
+  <div data-state="out">
+    <p class="form-msg hidden" role="status" data-out-msg></p>
+    <div class="tabs" role="tablist" data-tabs>
+      <button type="button" role="tab" data-tab="signin" aria-selected="true">Sign in</button>
+      <button type="button" role="tab" data-tab="create" aria-selected="false">Create a free account</button>
+    </div>
+    <form class="mailform auth" data-panel="signin" data-signin novalidate>
+      <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+      <label class="field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="actions"><button class="btn btn-navy" type="submit">Sign in</button>
+        <button class="link-btn" type="button" data-forgot>Forgotten your password?</button></div>
+      <p class="form-msg hidden" role="status" data-msg></p>
+    </form>
+    <form class="mailform auth hidden" data-panel="create" data-create novalidate>
+      <p>Membership is free. Once your account exists you can fill in as much or as little of your profile as you like.</p>
+      <label class="field"><span>Full name</span><input name="full_name" maxlength="120" autocomplete="name" required></label>
+      <label class="field"><span>Username</span><input name="username" maxlength="30" autocomplete="username" required>
+        <small class="why-field" data-username-msg>3 to 30 letters, numbers, dots, dashes or underscores. Fixed once chosen.</small></label>
+      <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required>
+        <small class="why-field">You sign in with this. We'll send a link to confirm it.</small></label>
+      <label class="field"><span>Password</span><input name="password" type="password" minlength="10" autocomplete="new-password" required>
+        <small class="why-field">At least 10 characters. A few random words works well.</small></label>
+      <label class="field"><span>Password again</span><input name="password2" type="password" minlength="10" autocomplete="new-password" required></label>
+      <label class="agree"><input type="checkbox" name="agree" required> <span>I've read the <a href="privacy.html#members">privacy notice</a>
+        and I'm happy for the network to keep my account details.</span></label>
+      <div class="actions"><button class="btn btn-navy" type="submit">Create my account</button></div>
+      <p class="form-msg hidden" role="status" data-msg></p>
+    </form>
+  </div>
+
+  <div data-state="recover" class="hidden">
+    <form class="mailform auth" data-newpass novalidate><h2>Choose a new password</h2>
+      <label class="field"><span>New password</span><input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
+      <div class="actions"><button class="btn btn-navy" type="submit">Save my new password</button></div>
+      <p class="form-msg hidden" role="status" data-msg></p></form>
+  </div>
+
+  <div data-state="in" class="hidden">
+    <div class="member-top"><h2>Hello, <span data-hello></span></h2><button class="btn btn-line" type="button" data-signout>Sign out</button></div>
+    <div class="tabs" role="tablist" data-tabs>
+      <button type="button" role="tab" data-tab="profile" aria-selected="true">Your profile</button>
+      <button type="button" role="tab" data-tab="foryou" aria-selected="false">For you</button>
+      <button type="button" role="tab" data-tab="exclusives" aria-selected="false">Member exclusives</button>
+      <button type="button" role="tab" data-tab="directory" aria-selected="false">Directory</button>
+      <button type="button" role="tab" data-tab="account" aria-selected="false">Account</button>
+    </div>
+    <div data-panel="profile">{profile_form}</div>
+    <div data-panel="foryou" class="hidden">
+      <p class="lead-in">Picked from your profile's interests and, if you've turned it on, from what you open.</p>
+      <div class="list" data-suggestions data-limit="20"></div><p class="learned" data-learned></p></div>
+    <div data-panel="exclusives" class="hidden"><div class="papers" data-exclusives><p class="empty">Loading.</p></div></div>
+    <div data-panel="directory" class="hidden">
+      <label class="search"><span class="small muted">Search</span><input type="search" data-dir-search placeholder="Name, research area or skill"></label>
+      <ul class="committee directory" data-directory></ul></div>
+    <div data-panel="account" class="hidden account">
+      <p>Signed in as <strong data-email-now></strong>.</p>
+      <form class="mailform auth" data-email-change novalidate><h3>Change email</h3>
+        <label class="field"><span>New email</span><input name="email" type="email" autocomplete="email" required></label>
+        <div class="actions"><button class="btn btn-line" type="submit">Change email</button></div><p class="form-msg hidden" role="status" data-msg></p></form>
+      <form class="mailform auth" data-pass-change novalidate><h3>Change password</h3>
+        <label class="field"><span>New password</span><input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
+        <div class="actions"><button class="btn btn-line" type="submit">Change password</button></div><p class="form-msg hidden" role="status" data-msg></p></form>
+      <div class="mailform auth"><h3>Your data</h3><p>Download everything we hold about you, as a file.</p>
+        <div class="actions"><button class="btn btn-line" type="button" data-download>Download my data</button></div></div>
+      <form class="mailform auth danger" data-delete novalidate><h3>Delete my account</h3>
+        <p>This deletes your account and profile straight away, and can't be undone. Type your username to confirm.</p>
+        <label class="field"><span>Username</span><input name="confirm" autocomplete="off" required></label>
+        <div class="actions"><button class="btn btn-line" type="submit">Delete my account</button></div><p class="form-msg hidden" role="status" data-msg></p></form>
+    </div>
+  </div>
+  <noscript><p class="note">The members' area needs JavaScript.</p></noscript>
+</div></section>
+<script src="{SUPABASE_JS[0]}" integrity="{SUPABASE_JS[1]}" crossorigin="anonymous" defer></script>
+<script src="assets/members.js" defer></script>"""
+    csp = CSP.replace("script-src 'self'", "script-src 'self' https://cdn.jsdelivr.net") \
+             .replace("connect-src 'self'", f"connect-src 'self' {url}")
+    return layout("members.html", "Members", body, "Your free members' account: profile, suggestions, exclusives and directory.", "members.html", csp=csp)
 
 
 def committee_section() -> str:
