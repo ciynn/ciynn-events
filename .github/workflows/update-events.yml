@@ -1,6 +1,7 @@
-# Re-scrape the events every Monday morning and publish site/ to GitHub Pages.
+# Rebuild the website every Monday morning (fresh events and conferences) and publish site/ to GitHub Pages.
+# It also rebuilds whenever something is pushed, e.g. a new news post or article.
 # Can also be run by hand from the Actions tab ("Run workflow").
-name: Update events page
+name: Build website
 
 on:
   schedule:
@@ -27,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: python scrape_events.py
+      - run: python build_site.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

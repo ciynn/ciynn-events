@@ -1,6 +1,6 @@
 """
-CIYNN events scraper: collects upcoming events from nuclear membership groups and writes them
-to site/index.html (the hosted page), site/events.csv and site/events.json.
+CIYNN events scraper: collects upcoming events and conferences from nuclear membership groups and
+international bodies. build_site.py uses it to make the website; run on its own it prints the list.
 
 Sources (one function each, below):
   NI    Nuclear Institute, including YGN and branch events (the site's own events feed)
@@ -9,18 +9,17 @@ Sources (one function each, below):
   IPEM  Institute of Physics and Engineering in Medicine (all-events listing)
   IOP   Institute of Physics (events listing, kept only if the event looks nuclear-related)
   NIA   Nuclear Industry Association (all-upcoming-events page)
+  IAEA  International Atomic Energy Agency conferences (conferences.iaea.org; open meetings only)
 
-Run:   python scrape_events.py            (all sources; writes site/index.html)
+Run:   python scrape_events.py            (all sources; prints what it found)
        python scrape_events.py NI SRP     (only those sources)
 
 It is polite by design: it checks each site's robots.txt, waits between requests, identifies
 itself, and only reads public listing pages. If a site changes its layout, that one source
 reports an error and the others still run.
 """
-import csv
 import datetime as dt
 import html
-import json
 import re
 import sys
 import time
@@ -101,7 +100,7 @@ def event(org, title, start, end=None, location="", url="", category="", descrip
     del description
     return {
         "org": org,
-        "title": " ".join(html.unescape(title).split()),
+        "title": " ".join(html.unescape(title).replace(chr(0x200E), "").split()),
         "start": start.isoformat() if start else "",
         "end": (end or start).isoformat() if start else "",
         "location": " ".join(location.split()),
@@ -256,8 +255,54 @@ def scrape_nia():
     return out
 
 
+def _iaea_months(html_text):
+    """Indico's event list: month headings ('November 2026') then items with '24 Nov - 27 Nov'."""
+    out = []
+    b = BeautifulSoup(html_text, "html.parser")
+    for h in b.find_all("h3"):
+        m = re.match(r"([A-Za-z]+) (\d{4})", text(h))
+        ul = h.find_next_sibling("ul")
+        if not m or m.group(1)[:3].lower() not in MONTHS or not ul:
+            continue
+        year = int(m.group(2))
+        for li in ul.find_all("li", recursive=False):
+            a = li.select_one(".event-title a")
+            d = re.findall(r"(\d{1,2}) ([A-Za-z]{3})", text(li.select_one(".date")))
+            if not a or not d:
+                continue
+            start = dt.date(year, month_num(d[0][1]), int(d[0][0]))
+            em = month_num(d[-1][1])
+            end = dt.date(year + (em < start.month), em, int(d[-1][0]))
+            out.append((a, start, end))
+    return out
+
+
+# IAEA technical meetings are by nomination only, so keep the open ones
+IAEA_OPEN = re.compile(r"conference|symposium|congress|school|workshop|forum", re.I)
+
+
+def scrape_iaea():
+    """IAEA conferences (conferences.iaea.org, an Indico site): the category page, then the rest of the
+    future list from the same JSON endpoint the page itself loads."""
+    base = "https://conferences.iaea.org/category/1/"
+    page = get(base).text
+    items = _iaea_months(page[page.find("future-events"):] if "future-events" in page else page)
+    m = re.search(r'data-event-list-after="([\d-]+)"', page)
+    if m:
+        items += _iaea_months(get(base + "event-list", params={"after": m.group(1)},
+                                  headers={"Accept": "application/json"}).json().get("html", ""))
+    out, seen = [], set()
+    for a, start, end in items:
+        title = text(a)
+        if not IAEA_OPEN.search(title) or a["href"] in seen:
+            continue
+        seen.add(a["href"])
+        out.append(event("IAEA", title, start, end, url=urljoin(base, a["href"]), category="Conference"))
+    return out
+
+
 SOURCES = {"NI": scrape_ni, "SRP": scrape_srp, "WiN": scrape_win,
-           "IPEM": scrape_ipem, "IOP": scrape_iop, "NIA": scrape_nia}
+           "IPEM": scrape_ipem, "IOP": scrape_iop, "NIA": scrape_nia, "IAEA": scrape_iaea}
 
 # Groups whose events can't be read automatically: shown as links on the HTML page
 MANUAL = [("BNMS (British Nuclear Medicine Society)", "https://www.bnms.org.uk/events"),
@@ -282,95 +327,19 @@ def dedupe(events):
     return kept
 
 
-OUT = HERE / "site"          # the hosted page: site/index.html (+ events.csv and events.json)
-
-# Filter buttons, in this order, with the label shown and the organisation codes they match
-FILTERS = [("all", "All"), ("NI", "Nuclear Institute"), ("YGN", "YGN"), ("SRP", "SRP"),
-           ("WiN", "WiN UK"), ("IPEM", "IPEM"), ("IOP", "IOP"), ("NIA", "NIA")]
-
-
-def org_codes(org: str) -> list[str]:
-    """'NI YGN / NIA' -> ['NI', 'YGN', 'NIA'] for the filter buttons."""
-    codes = []
-    for part in org.split(" / "):
-        if part == "NI YGN":
-            codes += ["NI", "YGN"]
-        elif part == "WiN UK":
-            codes.append("WiN")
-        else:
-            codes.append(part)
-    return codes
-
-
-def write_outputs(events, errors):
-    OUT.mkdir(exist_ok=True)
-    fields = ["start", "end", "org", "title", "location", "category", "url"]
-    with open(OUT / "events.csv", "w", newline="", encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields)
-        w.writeheader()
-        w.writerows(events)
-    (OUT / "events.json").write_text(json.dumps(
-        {"scraped": dt.datetime.now().isoformat(timespec="minutes"), "errors": errors, "events": events},
-        indent=1, ensure_ascii=False), encoding="utf-8")
-
-    def date_box(s, f):
-        if s == f:
-            return f"<b>{s.day}</b><span>{s.strftime('%b')}</span>"
-        if (s.year, s.month) == (f.year, f.month):
-            return f"<b>{s.day}–{f.day}</b><span>{s.strftime('%b')}</span>"
-        return f"<b>{s.day}</b><span>{s.strftime('%b')}–{f.strftime('%b')}</span>"
-
-    def when(s, f):
-        fmt = lambda d: d.strftime("%a %d %b %Y").replace(" 0", " ")
-        return fmt(s) if s == f else f"{fmt(s)} – {fmt(f)}"
-
-    rows, month = [], None
-    for e in events:
-        s, f = dt.date.fromisoformat(e["start"]), dt.date.fromisoformat(e["end"])
-        ongoing = s < TODAY                  # started already (e.g. a webinar series) and still running
-        m = "ongoing" if ongoing else s.strftime("%Y-%m")
-        if m != month:
-            rows.append(f'<h2 data-month="{m}">{"Ongoing" if ongoing else s.strftime("%B %Y")}</h2>')
-            month = m
-        chips = "".join(f'<span class="org">{html.escape(o)}</span>' for o in e["org"].split(" / "))
-        loc = f'<span>{html.escape(e["location"])}</span>' if e["location"] else ""
-        cat = f'<span>{html.escape(e["category"])}</span>' if e["category"] else ""
-        rows.append(
-            f'<article class="ev" data-month="{m}" data-orgs="{" ".join(org_codes(e["org"]))}">'
-            f'<div class="date">{date_box(s, f)}</div><div>'
-            f'<h3><a href="{html.escape(e["url"])}" target="_blank" rel="noopener">{html.escape(e["title"])}</a></h3>'
-            f'<div class="meta">{chips}<span class="when">{when(s, f)}</span>{loc}{cat}</div></div></article>')
-
-    present = {c for e in events for c in org_codes(e["org"])}
-    filters = "".join(
-        f'<button type="button" data-org="{k}" aria-pressed="{str(k == "all").lower()}">{v}</button>'
-        for k, v in FILTERS if k == "all" or k in present)
-    also = "".join(f'<li><a href="{u}" target="_blank" rel="noopener">{html.escape(n)}</a></li>' for n, u in MANUAL)
-
-    page = (HERE / "template.html").read_text(encoding="utf-8")
-    for k, v in {"{{FILTERS}}": filters, "{{COUNT}}": str(len(events)),
-                 "{{UPDATED}}": TODAY.strftime("%d %B %Y").lstrip("0"),
-                 "{{EVENTS}}": "\n  ".join(rows), "{{ALSO}}": also}.items():
-        page = page.replace(k, v)
-    (OUT / "index.html").write_text(page, encoding="utf-8")
-
-
-def main(names):
+def collect(names=None):
+    """Run the chosen sources (all by default). Returns (upcoming events, errors by source)."""
     events, errors = [], {}
-    for name in names:
+    for name in names or list(SOURCES):
         try:
             got = SOURCES[name]()
-            print(f"{name:5} {len(got):3} events")
+            print(f"{name:5} {len(got):3} items")
             events += got
         except Exception as exc:            # one broken site shouldn't stop the rest
             errors[name] = f"{type(exc).__name__}: {exc}"
             print(f"{name:5} ERROR {errors[name]}")
     events = [e for e in events if e["start"] and dt.date.fromisoformat(e["end"]) >= TODAY]
-    events = sorted(dedupe(events), key=lambda e: (e["start"], e["org"], e["title"]))
-    write_outputs(events, errors)
-    print(f"{len(events)} upcoming events -> {OUT / 'index.html'} (+ events.csv, events.json)")
-    if errors and len(errors) == len(names):
-        sys.exit("Every source failed: not publishing an empty page")
+    return sorted(dedupe(events), key=lambda e: (e["start"], e["org"], e["title"])), errors
 
 
 if __name__ == "__main__":
@@ -378,4 +347,7 @@ if __name__ == "__main__":
     bad = [n for n in wanted if n not in SOURCES]
     if bad:
         sys.exit(f"Unknown source(s): {', '.join(bad)}. Choose from: {', '.join(SOURCES)}")
-    main(wanted)
+    found, errs = collect(wanted)
+    for e in found:
+        print(f'{e["start"]}  {e["org"]:8}  {e["title"]}')
+    print(f"{len(found)} upcoming, errors: {errs or 'none'}")

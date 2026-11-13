@@ -1,0 +1,11 @@
+{
+  "name": "Chadwick Institute Young Nuclear Network",
+  "short": "CIYNN",
+  "host": "Chadwick Institute for Nuclear Innovation, University of Liverpool",
+  "tagline": "Connecting Liverpool's nuclear researchers with each other, and with industry.",
+  "email": "ChadwickInstituteNetwork@outlook.com",
+  "linktree": "https://linktr.ee/chadwick_institute_network",
+  "base_url": "https://ciynn.github.io/ciynn-events/",
+
+  "_comment": "The sign-up, partner and article forms address their emails to 'email' above."
+}
