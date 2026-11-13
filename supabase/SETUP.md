@@ -10,7 +10,7 @@ network (ChadwickInstituteNetwork@outlook.com), so the project belongs to the ne
 3. Create a **project**:
    - Name: `ciynn-members`
    - Database password: choose a long one and keep it in the committee's password manager (the website never uses it)
-   - Region: **West Europe (London)**
+   - Region: Central EU (Frankfurt) is what is in use (project `xngmybdxqkuxnxgtzcgj`)
 4. Wait a minute or two while it starts.
 
 ## 2. Make the database (one paste)

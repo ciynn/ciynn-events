@@ -837,7 +837,7 @@ def build(scraped: list[dict], errors: dict):
     browser counts which subjects you open, again only on your device. None of it is sent to us or anyone else, and
     "Forget me" deletes it. If you never use the page, nothing is stored.</p>
   <h2 id="members">Member accounts</h2>
-  <p>If you create a free account, your account and profile are stored with Supabase, in its London data centre, on the
+  <p>If you create a free account, your account and profile are stored with Supabase, in its Frankfurt data centre in the EU, on the
     network's behalf. Supabase checks your password and keeps only a secure (salted, hashed) version of it; nobody,
     including the committee, can see your password. Your name, username and email are needed to run your account;
     everything else in your profile is optional, and each field says what it's used for. Dietary and access needs are
