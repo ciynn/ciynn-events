@@ -170,7 +170,7 @@ TRAIL = '<span class="trail" aria-hidden="true"><i></i><i></i><i></i><i></i></sp
 
 NAV = [("index.html", "Home"), ("events.html", "Events"), ("conferences.html", "Conferences"),
        ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"),
-       ("partners.html", "Work with us"), ("about.html", "About"), ("for-you.html", "For you")]
+       ("partners.html", "Work with us"), ("research.html", "Research"), ("about.html", "About"), ("for-you.html", "For you")]
 
 sys.path.insert(0, str(HERE))
 import geomap  # noqa: E402  (the conference map)
@@ -262,6 +262,17 @@ PARTNER_FIELDS = [
     ("details", "Anything else: a topic, an idea, a question", "area", False, None),
     ("thanks", "You may thank us by name on the website and LinkedIn.", "agree", False, None),
     ("consent", "You may contact me about this.", "agree", True, None),
+]
+PAPER_FIELDS = [
+    ("name", "Your name", "text", True, None),
+    ("email", "Email", "email", True, None),
+    ("title", "Title", "text", True, None),
+    ("authors", "Authors", "text", True, None),
+    ("link", "Link (DOI, arXiv or journal page)", "url", False, None),
+    ("kind", "What it is", "select", True, ["Journal paper", "Preprint", "Conference paper or poster", "Report", "Thesis or chapter", "Other"]),
+    ("summary", "Abstract or a short summary", "area", True, None),
+    ("rights", "I'm an author, and sharing it here is allowed (open access, a preprint, or the publisher permits it).", "agree", True, None),
+    ("safe", "Nothing in it is confidential, commercially sensitive or export-controlled.", "agree", True, None),
 ]
 ARTICLE_FIELDS = [
     ("name", "Name", "text", True, None),
@@ -749,9 +760,10 @@ def build(scraped: list[dict], errors: dict):
     <li><strong>Visibility.</strong> A higher profile for Liverpool's nuclear research, regionally and nationally.</li>
     <li><strong>Outreach.</strong> Public engagement and schools outreach on nuclear science and radiation.</li></ul></div>
 </div></section>
+{committee_section()}
 <section class="section"><div class="wrap cols">
   <div class="prose"><h2>{TRAIL}How we're run</h2>
-    <p>A student committee runs the network and makes its decisions. Prof Peter Bryant, Director of the Chadwick
+    <p>The student committee above runs the network and makes its decisions. Prof Peter Bryant, Director of the Chadwick
       Institute, is our academic adviser.</p></div>
   <div class="prose"><h2>{TRAIL}Who we work with</h2>
     <p>The Nuclear Institute and its Young Generation Network, the Society for Radiological Protection, the British
@@ -760,6 +772,46 @@ def build(scraped: list[dict], errors: dict):
 <section class="section"><div class="wrap"><div class="prose"><h2>{TRAIL}Contact</h2>{email_block()}
   <p><a href="{CFG['linktree']}"{ext(CFG['linktree'])}>Instagram, LinkedIn and more on our Linktree</a></p></div></div></section>"""
     write("about.html", layout("about.html", "About", ab, "About the Chadwick Institute Young Nuclear Network: who we are, what we do and who we work with.", "about.html"))
+
+    # ---- research: members' papers and reports. Locked (no entries or files published) until research_open is true
+    research = sorted(load("research"), key=lambda r: r.get("date", ""), reverse=True)
+    is_open = bool(CFG.get("research_open"))
+    share = f"""
+<section class="form-band" id="share"><div class="wrap">
+  <div class="form-intro"><h2>Share your paper</h2><p>Members can share a paper, preprint, report or thesis chapter. Send us
+    the details and a link (a DOI or arXiv link is best); if it isn't published anywhere, attach the file to the email.
+    The committee checks each one before it goes up.</p></div>
+  {mail_form("paper", "Paper for the research page", "Title", PAPER_FIELDS, "Write the email",
+             "If you're sending a file, attach it in your email app before you send.")}
+</div></section>"""
+    if is_open:
+        rows = []
+        for r in research:
+            f = r.get("file", "")
+            src = (HERE / f).resolve() if f and not f.startswith("http") else None
+            if src and src.exists():
+                (OUT / "research").mkdir(exist_ok=True)
+                shutil.copy2(src, OUT / "research" / src.name)
+                link = f"research/{src.name}"
+            else:
+                link = r.get("link") or f
+            rows.append(f'''<article class="paper"><span class="tag">{esc(r.get("kind", "Paper"))}</span>
+  <h3><a href="{esc(link)}"{ext(link)}>{esc(r["title"])}</a></h3>
+  <p class="byline">{esc(r.get("authors", ""))}{", " + fmt(date_of(r["date"]), False) if date_of(r.get("date")) else ""}</p>
+  <p class="muted">{inline(r.get("summary", ""))}</p>
+  <details><summary>Abstract</summary><div class="prose">{markdown(r["body"])}</div></details></article>''')
+        rs = page_head("Research", "Papers, reports and projects by members of the network.")
+        rs += f'<section class="section"><div class="wrap"><div class="papers">{"".join(rows) or "<p class=empty>Nothing here yet.</p>"}</div></div></section>{share}'
+    else:
+        rs = page_head("Research", "Papers, reports and projects by members of the network.")
+        rs += f"""<section class="section"><div class="wrap"><div class="locked">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h1Zm2 0h6V7a3 3 0 0 0-6 0v3Z"/></svg>
+  <div><h2>Opening soon</h2><p>We're getting this section ready. When it opens it will hold papers, reports and project
+    write-ups by our members, starting with the network's own research on the Chadwick Institute and the North West
+    nuclear sector. Join the network to hear when it opens.</p>
+  <div class="actions"><a class="btn btn-navy" href="join.html">Join the network</a></div></div>
+</div></div></section>"""
+    write("research.html", layout("research.html", "Research", rs, "Papers, reports and projects by members of the Chadwick Institute Young Nuclear Network.", "research.html"))
 
     # ---- privacy and 404
     pv = page_head("Privacy")
@@ -815,6 +867,13 @@ def build(scraped: list[dict], errors: dict):
     for n in news[:12]:
         items.append({"kind": "news", "title": n["title"], "url": f"news/{n['slug']}.html", "start": n.get("date", ""),
                       "org": "News", "region": "uk", "fields": interests_of(n["title"] + " " + n.get("summary", "") + " " + n["body"][:600])})
+    seen, unique = set(), []                     # an IOP conference is both an event and a conference: keep one
+    for it in sorted(items, key=lambda i: i["kind"] != "conference"):
+        k = (re.sub(r"\W", "", it["title"].lower()), it["start"])
+        if k not in seen:
+            seen.add(k)
+            unique.append(it)
+    items = unique
     (OUT / "items.json").write_text(json.dumps({"built": TODAY.isoformat(), "fields": {FIELD_KEYS[f]: f for f, _ in FIELDS} | {"careers": "Careers and skills"},
                                                 "items": items}, ensure_ascii=False), encoding="utf-8")
 
@@ -835,14 +894,15 @@ def build(scraped: list[dict], errors: dict):
       <label class="field"><span>I'd travel to</span><select name="travel"><option value="anywhere">Anywhere</option>
         <option value="europe">The UK and Europe</option><option value="uk">The UK only</option><option value="online">Online only</option></select></label>
     </div>
-    <label class="agree wide"><input type="checkbox" name="learn"> <span>Also learn from what I open on this site, to
-      improve my suggestions (kept only in this browser)</span></label>
+    <label class="agree wide"><input type="checkbox" name="learn"> <span>Learn from what I open: a small model in this
+      browser notices which events I pick and suggests ones like them (it never leaves this device)</span></label>
     <div class="actions"><button class="btn btn-navy" type="submit">Save and show my suggestions</button>
       <button class="btn btn-line" type="button" data-forget>Forget me</button></div>
     <p class="small muted hidden" role="status" data-saved>Saved in this browser.</p>
   </form>
   <div class="sec-head"><h2>{TRAIL}Suggested for you</h2></div>
   <div class="list" data-suggestions data-limit="20"><p class="empty">Choose a few interests above and we'll suggest things here.</p></div>
+  <p class="learned" data-learned></p>
   <p class="small muted">How it works: each suggestion matches your interests, is somewhere you'd go, and is coming up soon.
     Nothing is sent anywhere; "Forget me" deletes it all.</p>
 </div></section>"""
@@ -868,6 +928,32 @@ def build(scraped: list[dict], errors: dict):
           f"{len(news)} news, {len(articles)} articles, {len(opps)} opportunities -> {OUT}")
     if errors:
         print("Sources with errors (their items are missing this week):", ", ".join(errors))
+
+
+def committee_section() -> str:
+    """Meet the committee: the photo, then each member with their role and the relationships they look after
+    (content/committee.csv: name, role, relationships separated by ;)."""
+    f = CONTENT / "committee.csv"
+    if not f.exists():
+        return ""
+    people = list(csv.DictReader(f.open(encoding="utf-8-sig")))
+    cards = "".join(
+        f'''<li><h3>{esc(m["name"])}</h3><p class="role">{esc(m["role"])}</p>
+  <p class="small muted">Looks after</p><ul>{"".join(f"<li>{esc(x.strip())}</li>" for x in m["relationships"].split(";") if x.strip())}</ul></li>'''
+        for m in people)
+    photo = ('<figure class="team-photo"><img src="images/committee.jpg" width="1600" height="1200" loading="lazy" '
+             'alt="Eight members of the network on a staircase, smiling; the one in front holds the poster for our first talk, '
+             'Radiological protection and the role of membership groups.">'
+             '<figcaption class="small muted">The network with the poster for our first talk.</figcaption></figure>'
+             if (CONTENT / "images" / "committee.jpg").exists() else "")
+    return f'''<section class="section" id="committee"><div class="wrap">
+  <div class="sec-head"><h2>{TRAIL}Meet the committee</h2></div>
+  <p class="lead-in">We're PhD students who wanted a place for nuclear researchers at Liverpool to meet each other and the
+    people they'll work with. Each of us looks after a few relationships, so if you'd like to work with one of these
+    organisations, that's the person to talk to.</p>
+  {photo}
+  <ul class="committee">{cards}</ul>
+</div></section>'''
 
 
 def post_card(i: dict, kind: str) -> str:

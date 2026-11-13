@@ -224,13 +224,58 @@
                      industry: /industry|supply chain|ygn|networking|nuclear institute|nia|professional/i,
                      staff: /conference|symposium|congress|workshop/i };
 
+  // The learning model: online logistic regression, trained in this browser on what the visitor opens.
+  // Features: the item's fields, kind, organiser, region and title words. An item they open is a positive example;
+  // items they passed over just above it in the same list are (weaker) negative ones. Predictions are the
+  // probability that they would open an item, and feed into the suggestion score.
+  var STOP = /^(with|from|into|your|their|this|that|what|about|annual|international|conference|meeting|event|events|session|2026|2027|2028|part|online|webinar|series|introduction|intro)$/;
+  function tokens(t) {
+    return ((t || '').toLowerCase().match(/[a-z][a-z-]{3,}/g) || []).filter(function (w, i, all) {
+      return !STOP.test(w) && all.indexOf(w) === i;
+    }).slice(0, 12);
+  }
+  function feats(o) {
+    var x = ['b'];
+    (o.fields || []).forEach(function (f) { if (f) x.push('f:' + f); });
+    if (o.kind) x.push('k:' + o.kind);
+    if (o.org) x.push('o:' + o.org.split(' / ')[0]);
+    if (o.region) x.push('r:' + o.region);
+    tokens(o.title).forEach(function (w) { x.push('w:' + w); });
+    return x.filter(function (f, i, all) { return all.indexOf(f) === i; });
+  }
+  function model() {
+    prefs.model = prefs.model || { w: { b: -1 }, pos: 0, neg: 0 };    // starts believing most things won't interest them
+    return prefs.model;
+  }
+  function predict(m, x) {
+    var z = 0;
+    x.forEach(function (f) { z += m.w[f] || 0; });
+    return 1 / (1 + Math.exp(-z));
+  }
+  function learn(m, x, y, rate) {
+    var g = (y - predict(m, x)) * rate / Math.sqrt(x.length);
+    x.forEach(function (f) { m.w[f] = (m.w[f] || 0) * 0.999 + g; });   // small decay keeps old habits from dominating
+    if (y) m.pos++; else m.neg++;
+    var keys = Object.keys(m.w);
+    if (keys.length > 600) {                                         // keep the model small
+      keys.sort(function (a, b) { return Math.abs(m.w[b]) - Math.abs(m.w[a]); });
+      keys.slice(600).forEach(function (k) { if (k !== 'b') delete m.w[k]; });
+    }
+  }
+  function trained() { return prefs && prefs.learn && prefs.model && prefs.model.pos >= 2; }
+
   function score(item, p, fieldNames, now) {
-    var why = [], s = 0, interests = p.interests || [], w = p.weights || {};
+    var why = [], s = 0, interests = p.interests || [], liked = false;
     item.fields.filter(function (f, i, all) { return all.indexOf(f) === i; }).forEach(function (f) {
       if (interests.indexOf(f) >= 0) { s += 3; why.push(fieldNames[f] || f); }
-      else if (p.learn && w[f]) { s += Math.min(w[f], 6) * 0.5; if (w[f] >= 2) why.push('you often open ' + (fieldNames[f] || f).toLowerCase()); }
     });
-    if (s === 0 && item.kind !== 'ours') return null;           // nothing in common: don't suggest it
+    if (trained()) {
+      var q = predict(p.model, feats(item));
+      s += 6 * (q - 0.3);
+      liked = q > 0.55;
+      if (liked) why.push('like things you’ve opened');
+    }
+    if (s <= 0 && !liked && item.kind !== 'ours') return null;  // nothing in common: don't suggest it
     var near = NEAR[p.travel];
     if (near && near.indexOf(item.region) < 0) return null;     // somewhere they said they wouldn't go
     if (item.kind === 'ours') { s += 2; why.unshift('our own event'); }
@@ -244,10 +289,23 @@
     return { s: s, why: why };
   }
 
+  // In plain words: what the model has learned so far (shown on the For you page)
+  function describeModel(fieldNames) {
+    if (!trained()) return '';
+    var KINDS = { conference: 'conferences', event: 'events', opportunity: 'opportunities', news: 'news', ours: 'our own events' };
+    var REG = { uk: 'the UK', europe: 'Europe', namerica: 'North America', world: 'further afield', online: 'online events' };
+    var top = Object.keys(prefs.model.w).filter(function (k) { return k !== 'b' && prefs.model.w[k] > 0.15; })
+      .sort(function (a, b) { return prefs.model.w[b] - prefs.model.w[a]; }).slice(0, 6).map(function (k) {
+        var v = k.slice(2);
+        return { f: fieldNames[v] ? fieldNames[v].toLowerCase() : v, k: KINDS[v] || v, o: v, r: REG[v] || v, w: '“' + v + '”' }[k[0]];
+      });
+    return top.length ? 'Learned so far from ' + prefs.model.pos + ' things you’ve opened: you lean towards ' + top.join(', ') + '.' : '';
+  }
+
   function renderSuggestions(data) {
     var lists = document.querySelectorAll('[data-suggestions]');
     if (!lists.length) return;
-    var ready = prefs && ((prefs.interests && prefs.interests.length) || (prefs.learn && prefs.weights && Object.keys(prefs.weights).length));
+    var ready = prefs && ((prefs.interests && prefs.interests.length) || trained());
     document.querySelectorAll('[data-foryou-invite]').forEach(function (el) { el.classList.toggle('hidden', !!ready); });
     lists.forEach(function (list) {
       list.textContent = '';
@@ -255,6 +313,8 @@
         if (list.closest('[data-foryou-page]')) list.innerHTML = '<p class="empty">Choose a few interests above and we’ll suggest things here.</p>';
         return;
       }
+      var learned = document.querySelector('[data-learned]');
+      if (learned) learned.textContent = describeModel(data.fields);
       var now = new Date(), picks = [];
       data.items.forEach(function (it) { var r = score(it, prefs, data.fields, now); if (r) picks.push({ it: it, r: r }); });
       picks.sort(function (a, b) { return b.r.s - a.r.s || (a.it.start || '9').localeCompare(b.it.start || '9'); });
@@ -273,6 +333,7 @@
         if (d) { box.querySelector('b').textContent = d.getDate(); box.querySelector('span').textContent = d.toLocaleString('en-GB', { month: 'short' }); }
         var body = document.createElement('div'), h = document.createElement('h3'), link = document.createElement('a');
         link.href = url; link.textContent = it.title; link.dataset.fields = it.fields.join(' ');
+        link.dataset.kind = it.kind; link.dataset.org = it.org || ''; link.dataset.region = it.region || '';
         if (/^https?:/.test(it.url)) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
         h.appendChild(link);
         var meta = document.createElement('div'); meta.className = 'meta';
@@ -296,15 +357,29 @@
     });
   }
 
-  // learning (opt-in): count the subjects of what the visitor opens
+  // learning (opt-in): what the visitor opens trains the model; what they passed over just above it counts against
+  var PAGE_KIND = /conferences/.test(location.pathname) ? 'conference' : /opportunities/.test(location.pathname) ? 'opportunity'
+    : /news/.test(location.pathname) ? 'news' : 'event';
+  function rowItem(row, link) {
+    link = link || row.querySelector('h3 a');
+    var src = link && link.dataset.fields !== undefined ? link : row;
+    var orgEl = row.querySelector('.org');
+    return { title: link ? link.textContent : '', fields: (src.dataset.fields || '').split(' '),
+             kind: (link && link.dataset.kind) || PAGE_KIND,
+             org: (link && link.dataset.org) || (orgEl && !row.classList.contains('suggestion') ? orgEl.textContent : ''),
+             region: (link && link.dataset.region) || row.dataset.region || '' };
+  }
   document.addEventListener('click', function (ev) {
     if (!prefs || !prefs.learn) return;
     var a = ev.target.closest && ev.target.closest('a');
-    if (!a) return;
-    var holder = a.dataset.fields ? a : a.closest('[data-fields]');
-    if (!holder) return;
-    prefs.weights = prefs.weights || {};
-    holder.dataset.fields.split(' ').forEach(function (f) { if (f) prefs.weights[f] = (prefs.weights[f] || 0) + 1; });
+    var row = a && a.closest('.row');
+    if (!row || !(a.dataset.fields !== undefined || row.dataset.fields !== undefined)) return;
+    var m = model();
+    learn(m, feats(rowItem(row, a)), 1, 0.8);
+    var rows = Array.prototype.slice.call(row.parentNode.querySelectorAll(':scope > .row:not(.hidden)'));
+    rows.slice(Math.max(0, rows.indexOf(row) - 3), rows.indexOf(row)).forEach(function (r) {   // passed over
+      learn(m, feats(rowItem(r)), 0, 0.25);
+    });
     savePrefs(prefs);
   }, true);
 
@@ -322,7 +397,7 @@
       ev.preventDefault();
       var p = { v: 1, interests: Array.prototype.map.call(form.querySelectorAll('input[name="interest"]:checked'), function (c) { return c.value; }),
                 role: fld('role').value, travel: fld('travel').value, learn: fld('learn').checked,
-                weights: fld('learn').checked && prefs ? (prefs.weights || {}) : {} };
+                model: fld('learn').checked && prefs && prefs.model ? prefs.model : undefined };
       var ok = savePrefs(p); prefs = p;
       var msg = form.querySelector('[data-saved]');
       msg.textContent = ok ? 'Saved in this browser.' : 'This browser won’t let the site save anything (private mode?), so your choices last only until you leave the page.';

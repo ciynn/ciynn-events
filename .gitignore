@@ -1,3 +1,6 @@
 # Built by build_site.py (and by the weekly GitHub Action)
 site/
 __pycache__/
+
+# Research entries and files stay private until the section opens (see README)
+content/research/

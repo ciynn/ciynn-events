@@ -313,3 +313,20 @@ tbody th small { display: block; font: 400 .85rem var(--sans); color: var(--mute
 .site-foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .site-foot .legal { grid-column: 1 / -1; border-top: 1px solid rgba(231,220,192,.2); padding-top: 18px; font-size: .85rem; color: rgba(231,220,192,.8); }
 @media (max-width: 760px) { .site-foot .wrap { grid-template-columns: minmax(0, 1fr); } }
+
+/* committee */
+.team-photo { margin: 0 0 30px; display: grid; gap: 8px; }
+.team-photo img { width: 100%; height: auto; border-radius: 10px; display: block; }
+.committee { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 26px 28px; }
+.committee > li { display: grid; gap: 6px; align-content: start; padding-top: 14px; border-top: 3px solid var(--gold); }
+.committee .role { font-weight: 600; color: var(--accent-text); }
+.committee ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; font-size: .95rem; }
+
+/* research */
+.locked { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 22px; max-width: 760px; padding: 28px; background: var(--chip); border: 1px solid var(--line); border-radius: 10px; }
+.locked svg { width: 48px; height: 48px; fill: var(--gold); }
+.locked > div { display: grid; gap: 12px; }
+.papers { display: grid; gap: 30px; max-width: 860px; }
+.paper { display: grid; gap: 6px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+
+.learned { font-style: italic; color: var(--muted); }
