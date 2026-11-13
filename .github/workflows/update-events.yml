@@ -28,6 +28,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      # places already looked up for the map, so each one is only ever looked up once
+      - uses: actions/cache@v4
+        with:
+          path: content/geocache.json
+          key: geocache-${{ github.run_id }}
+          restore-keys: geocache-
       - run: python build_site.py
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -10,6 +10,9 @@ Sources (one function each, below):
   IOP   Institute of Physics (events listing, kept only if the event looks nuclear-related)
   NIA   Nuclear Industry Association (all-upcoming-events page)
   IAEA  International Atomic Energy Agency conferences (conferences.iaea.org; open meetings only)
+  ANS   American Nuclear Society conferences (ans.org/meetings)
+  NPSS  IEEE Nuclear and Plasma Sciences Society conferences (ieee-npss.org/conferences)
+  EPS   European Physical Society calendar (its iCal feed), nuclear and plasma meetings only
 
 Run:   python scrape_events.py            (all sources; prints what it found)
        python scrape_events.py NI SRP     (only those sources)
@@ -94,6 +97,16 @@ def next_occurrence(day: int, month: int) -> dt.date:
     return d if d >= TODAY - dt.timedelta(days=31) else dt.date(TODAY.year + 1, month, day)
 
 
+def tidy_place(s: str) -> str:
+    """'Bologna, Italy, Bologna,, Italy' -> 'Bologna, Italy'."""
+    parts = []
+    for x in " ".join((s or "").split()).split(","):
+        x = x.strip()
+        if x and x.lower() not in [p.lower() for p in parts]:
+            parts.append(x)
+    return ", ".join(parts)
+
+
 def event(org, title, start, end=None, location="", url="", category="", description=""):
     # Only facts are kept (title, dates, place, link). The organisations' own descriptions are
     # their copyright text, so they are not stored: people follow the link to read them.
@@ -103,7 +116,7 @@ def event(org, title, start, end=None, location="", url="", category="", descrip
         "title": " ".join(html.unescape(title).replace(chr(0x200E), "").split()),
         "start": start.isoformat() if start else "",
         "end": (end or start).isoformat() if start else "",
-        "location": " ".join(location.split()),
+        "location": tidy_place(location),
         "category": category,
         "url": url,
     }
@@ -164,10 +177,9 @@ def _ics_date(v: str) -> dt.date:
     return dt.date(int(v[0:4]), int(v[4:6]), int(v[6:8]))
 
 
-def scrape_win():
-    """Women in Nuclear UK: its public iCal feed."""
-    t = get("https://www.winuk.org.uk/?post_type=tribe_events&ical=1&eventDisplay=list").text
-    t = re.sub(r"\r?\n[ \t]", "", t)        # unfold folded lines
+def read_ics(url: str) -> list[dict]:
+    """The events in a public iCal feed, as dicts of their fields (SUMMARY, DTSTART, LOCATION, URL, ...)."""
+    t = re.sub(r"\r?\n[ \t]", "", get(url).text)        # unfold folded lines
     out = []
     for block in t.split("BEGIN:VEVENT")[1:]:
         f = {}
@@ -175,13 +187,24 @@ def scrape_win():
             if ":" in line:
                 k, v = line.split(":", 1)
                 f[k.split(";")[0]] = v.replace("\\,", ",").replace("\\n", " ").replace("\\;", ";")
-        if "DTSTART" not in f:
-            continue
-        out.append(event("WiN UK", f.get("SUMMARY", ""), _ics_date(f["DTSTART"]),
-                         _ics_date(f.get("DTEND", f["DTSTART"])), location=f.get("LOCATION", ""),
-                         url=f.get("URL", ""), category=f.get("CATEGORIES", ""),
-                         description=f.get("DESCRIPTION", "")))
+        if "DTSTART" in f:
+            out.append(f)
     return out
+
+
+def _ics_end(f) -> dt.date:
+    """An all-day DTEND is the day after the event ends."""
+    end = _ics_date(f.get("DTEND", f["DTSTART"]))
+    if len(f.get("DTEND", "")) == 8 and end > _ics_date(f["DTSTART"]):
+        end -= dt.timedelta(days=1)
+    return end
+
+
+def scrape_win():
+    """Women in Nuclear UK: its public iCal feed."""
+    return [event("WiN UK", f.get("SUMMARY", ""), _ics_date(f["DTSTART"]), _ics_end(f),
+                  location=f.get("LOCATION", ""), url=f.get("URL", ""), category=f.get("CATEGORIES", ""))
+            for f in read_ics("https://www.winuk.org.uk/?post_type=tribe_events&ical=1&eventDisplay=list")]
 
 
 def scrape_ipem(max_pages=8):
@@ -201,7 +224,7 @@ def scrape_ipem(max_pages=8):
             start = dt.date(int(ds[0][2]), int(ds[0][1]), int(ds[0][0]))
             end = dt.date(int(ds[-1][2]), int(ds[-1][1]), int(ds[-1][0]))
             out.append(event("IPEM", text(a), start, end,
-                             location=text(c.select_one(".card-content__time")),
+                             category=text(c.select_one(".card-content__time")),
                              url=urljoin("https://www.ipem.ac.uk", a["href"]),
                              description=text(c.select_one(".card-content__description"))))
             found += 1
@@ -230,7 +253,7 @@ def scrape_iop(max_pages=10):
             if not NUCLEAR_WORDS.search(title):
                 continue
             out.append(event("IOP", title, start, end,
-                             location=text(b.select_one(".iop-media-block__event-type")),
+                             category=text(b.select_one(".iop-media-block__event-type")),
                              url=urljoin("https://www.iop.org", a["href"])))
     return out
 
@@ -297,12 +320,78 @@ def scrape_iaea():
         if not IAEA_OPEN.search(title) or a["href"] in seen:
             continue
         seen.add(a["href"])
-        out.append(event("IAEA", title, start, end, url=urljoin(base, a["href"]), category="Conference"))
+        url = urljoin(base, a["href"])
+        try:                                   # the venue is on the event's own page
+            place = text(soup(url).select_one(".infoline.location .place"))
+        except Exception:
+            place = ""
+        if re.fullmatch(r"(VIC|IAEA\W*(HQ|Headquarters).*|Vienna International Cent(re|er).*)", place or "", re.I):
+            place = "Vienna, Austria"
+        out.append(event("IAEA", title, start, end, location=place, url=url, category="Conference"))
+    return out
+
+
+def _us_dates(s: str):
+    """'November 15-18, 2026', 'May 30-June 3, 2027', 'June 13, 2027' (any dash)."""
+    s = re.sub(r"[‒-―]", "-", s)
+    m = re.match(r"([A-Za-z]+)\s+(\d{1,2})(?:\s*-\s*(?:([A-Za-z]+)\s+)?(\d{1,2}))?,\s*(\d{4})", s.strip())
+    if not m:
+        return None, None
+    m1, d1, m2, d2, y = m.groups()
+    start = dt.date(int(y), month_num(m1), int(d1))
+    end = dt.date(int(y), month_num(m2 or m1), int(d2 or d1))
+    return start, (end if end >= start else end.replace(year=end.year + 1))
+
+
+def scrape_ans():
+    """American Nuclear Society: upcoming conferences."""
+    out = []
+    for ev in soup("https://www.ans.org/meetings/").select("div.event"):
+        a, when = ev.select_one("p.title a"), ev.select_one("p.callout")
+        if not a or not when:
+            continue
+        start, end = _us_dates(text(when))
+        place = text(ev.select_one("p.location")).split("|")[0].strip()
+        out.append(event("ANS", text(a), start, end, location=place, url=a["href"], category="Conference"))
+    return out
+
+
+def scrape_npss():
+    """IEEE Nuclear and Plasma Sciences Society: its conference table (NSS/MIC, SOFE, ICOPS, ...)."""
+    out = []
+    for tr in soup("https://ieee-npss.org/conferences/").select("tr.conference"):
+        a, times = tr.select_one(".conference__name a"), tr.select("time[datetime]")
+        if not a or not times:
+            continue
+        start = dt.date.fromisoformat(times[0]["datetime"][:10])
+        end = dt.date.fromisoformat(times[-1]["datetime"][:10])
+        lines = [x.strip() for x in tr.select("td")[-1].get_text("\n").split("\n") if x.strip()]
+        place = next((x for x in lines if re.search(r"[A-Za-z]{3}", x) and not re.search(r"\d|register", x, re.I)), "")
+        short = re.sub(r"\b(NPSS|TCO|CO)\b", "", text(tr.select_one(".conference__meta__short-name"))).strip()
+        short = re.sub(r"^\d{4}\s*", "", short)
+        title = text(a) + (f" ({short})" if short and short not in text(a) else "")
+        out.append(event("IEEE NPSS", title, start, end, location=place, url=a["href"].strip(), category="Conference"))
+    return out
+
+
+def scrape_eps():
+    """European Physical Society: its public calendar, keeping nuclear, plasma and related meetings."""
+    out = []
+    for f in read_ics("https://eps.org/events/?ical=1"):
+        words = " ".join(f.get(k, "") for k in ("SUMMARY", "CATEGORIES", "DESCRIPTION"))
+        if not NUCLEAR_WORDS.search(words):
+            continue
+        out.append(event("EPS", f.get("SUMMARY", ""), _ics_date(f["DTSTART"]), _ics_end(f),
+                         location=f.get("LOCATION", ""), url=f.get("URL", ""), category="Conference"))
     return out
 
 
 SOURCES = {"NI": scrape_ni, "SRP": scrape_srp, "WiN": scrape_win,
-           "IPEM": scrape_ipem, "IOP": scrape_iop, "NIA": scrape_nia, "IAEA": scrape_iaea}
+           "IPEM": scrape_ipem, "IOP": scrape_iop, "NIA": scrape_nia,
+           "IAEA": scrape_iaea, "ANS": scrape_ans, "NPSS": scrape_npss, "EPS": scrape_eps}
+
+# Sources that list conferences rather than events (they go on the conferences page only)
+CONFERENCE_ORGS = {"IAEA", "ANS", "IEEE NPSS", "EPS"}
 
 # Groups whose events can't be read automatically: shown as links on the HTML page
 MANUAL = [("BNMS (British Nuclear Medicine Society)", "https://www.bnms.org.uk/events"),

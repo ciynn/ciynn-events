@@ -212,6 +212,30 @@ tbody th small { display: block; font: 400 .85rem var(--sans); color: var(--mute
 .copy code { font: 500 1rem var(--sans); background: var(--card); border: 1px solid var(--line); padding: 6px 10px; border-radius: var(--r); user-select: all; word-break: break-all; }
 .copy button { font: 500 .9rem var(--sans); background: none; border: 1px solid var(--line); color: var(--fg); padding: 6px 12px; border-radius: var(--r); cursor: pointer; }
 
+/* ways to help (work with us) */
+.ways { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 26px 40px; }
+.ways li { display: grid; gap: 4px; padding-left: 18px; border-left: 3px solid var(--gold); }
+.ways strong { font: 600 1.15rem var(--cond); }
+.ways span { color: var(--muted); }
+
+/* conference world map */
+.map { margin: 0 0 26px; display: grid; gap: 10px; }
+.map svg { width: 100%; height: auto; display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.map .land { fill: var(--chip); stroke: var(--line); stroke-width: .6; }
+.map .dot { cursor: pointer; outline: none; }
+.map .dot circle:not(.hit) { fill: var(--gold); stroke: var(--card); stroke-width: 2; fill-opacity: .9; transition: fill .15s; }
+.map .dot .hit { fill: transparent; }
+.map .dot text { font: 600 10px var(--sans); fill: #fff; text-anchor: middle; pointer-events: none; }
+.map .dot:hover circle:not(.hit), .map .dot:focus-visible circle:not(.hit), .map .dot.on circle:not(.hit) { fill: var(--navy); }
+.map .dot:focus-visible circle:not(.hit) { stroke: var(--focus); stroke-width: 3; }
+.map .dot.dim { opacity: .25; }
+@media (prefers-color-scheme: dark) {
+  .map .dot circle:not(.hit) { fill: var(--gold-bright); } .map .dot text { fill: var(--midnight); }
+  .map .dot:hover circle:not(.hit), .map .dot:focus-visible circle:not(.hit), .map .dot.on circle:not(.hit) { fill: #fff; }
+}
+.place-note { background: var(--chip); border-left: 4px solid var(--gold); padding: 10px 16px; border-radius: 4px; margin-bottom: 8px; }
+.link-btn { background: none; border: 0; padding: 0; margin-left: 6px; font: inherit; color: var(--link); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
 /* email forms (join, partners, articles) */
 .form-band { background: var(--chip); border-block: 1px solid var(--line); }
 .form-band .wrap { padding-block: 56px; display: grid; gap: 26px; }

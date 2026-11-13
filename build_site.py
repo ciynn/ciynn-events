@@ -170,7 +170,10 @@ TRAIL = '<span class="trail" aria-hidden="true"><i></i><i></i><i></i><i></i></sp
 
 NAV = [("index.html", "Home"), ("events.html", "Events"), ("conferences.html", "Conferences"),
        ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"),
-       ("partners.html", "Partners"), ("about.html", "About")]
+       ("partners.html", "Work with us"), ("about.html", "About")]
+
+sys.path.insert(0, str(HERE))
+import geomap  # noqa: E402  (the conference map)
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; object-src 'none'; "
@@ -248,19 +251,17 @@ JOIN_FIELDS = [
                 "I can unsubscribe at any time.", "agree", True, None),
 ]
 PARTNER_FIELDS = [
-    ("org", "Organisation", "text", True, None),
-    ("web", "Website", "url", False, None),
-    ("name", "Contact name", "text", True, None),
-    ("title", "Job title", "text", False, None),
+    ("name", "Your name", "text", True, None),
     ("email", "Email", "email", True, None),
-    ("phone", "Phone", "tel", False, None),
-    ("level", "Level", "select", True, ["Supporter", "Partner", "Strategic partner", "Not sure yet: let's talk"]),
-    ("offer", "What you'd like to offer", "checks", False, ["Seminar talk", "Workshop or training", "Careers session",
-        "Site visit", "Placements or internships", "Mentoring", "Summer school session", "Equipment or software loan",
-        "Bursaries or prizes", "Event catering", "Partner Day stand"]),
-    ("details", "Details: topics, dates, contribution value, anything else", "area", False, None),
-    ("logo", "You may show our name and logo as a partner (we'll send the logo files).", "agree", False, None),
-    ("consent", "You may contact me about this partnership.", "agree", True, None),
+    ("org", "Organisation", "text", True, None),
+    ("title", "Job title", "text", False, None),
+    ("help", "I'd like to", "checks", False, ["Give a talk", "Run a workshop or careers session", "Host a visit",
+        "Share an opportunity", "Mentor someone", "Support an event", "Help with the summer school", "Talk it through first"]),
+    ("how", "In person or online", "select", False, ["In person", "Online", "Either"]),
+    ("when", "Roughly when suits you", "text", False, None),
+    ("details", "Anything else: a topic, an idea, a question", "area", False, None),
+    ("thanks", "You may thank us by name on the website and LinkedIn.", "agree", False, None),
+    ("consent", "You may contact me about this.", "agree", True, None),
 ]
 ARTICLE_FIELDS = [
     ("name", "Name", "text", True, None),
@@ -321,7 +322,7 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
     <div><b>{esc(CFG['name'])}</b>
       <p>A student-led network for nuclear researchers at Liverpool, hosted by the {esc(CFG['host'])}.</p></div>
     <div><b>Get involved</b><ul>
-      <li><a href="{root}join.html">Join the network</a></li><li><a href="{root}partners.html">Partner with us</a></li>
+      <li><a href="{root}join.html">Join the network</a></li><li><a href="{root}partners.html">Work with us</a></li>
       <li><a href="{root}articles.html#write">Write for us</a></li><li><a href="{CFG['linktree']}"{ext(CFG['linktree'])}>Linktree</a></li></ul></div>
     <div><b>Contact</b><ul>
       <li><a href="mailto:{esc(CFG['email'])}">{esc(CFG['email'])}</a></li>
@@ -403,7 +404,8 @@ def ext_row(e: dict, tags: str) -> str:
     loc = f'<span>{esc(e["location"])}</span>' if e.get("location") else ""
     field = f'<span>{esc(e["field"])}</span>' if e.get("field") else ""
     deadline = f'<span>Abstracts by {fmt(date_of(e["deadline"]))}</span>' if date_of(e.get("deadline", "")) else ""
-    return (f'<article class="row" data-month="{month}" data-tags="{esc(tags)}">{date_box(s, f)}<div>'
+    place = f' data-place="{esc(e["place_key"])}"' if e.get("place_key") else ""
+    return (f'<article class="row" data-month="{month}" data-tags="{esc(tags)}"{place}>{date_box(s, f)}<div>'
             f'<h3><a href="{esc(e["url"])}"{ext(e["url"])}>{esc(e["title"])}</a></h3>'
             f'<div class="meta">{chips}<span>{span(s, f)}</span>{loc}{field}{deadline}</div></div></article>')
 
@@ -451,8 +453,9 @@ def build(scraped: list[dict], errors: dict):
                   key=lambda o: o.get("closes") or "9999")
 
     # events (membership groups) and conferences (IAEA, conference-like events, and the committee's list)
-    events = [e for e in scraped if e["org"] != "IAEA"]
-    confs = [dict(e) for e in scraped if e["org"] == "IAEA" or CONF_WORDS.search(e["title"])]
+    is_conf_org = lambda e: e["org"].split(" / ")[0] in se.CONFERENCE_ORGS
+    events = [e for e in scraped if not is_conf_org(e)]
+    confs = [dict(e) for e in scraped if is_conf_org(e) or CONF_WORDS.search(e["title"])]
     added = CONTENT / "conferences.csv"
     if added.exists():
         for r in csv.DictReader(added.open(encoding="utf-8-sig")):
@@ -464,6 +467,16 @@ def build(scraped: list[dict], errors: dict):
     for c in confs:
         c["field"] = c.get("field") or (ORG_FIELD.get(c["org"]) if c["org"] in ORG_FIELD and not re.search(FIELDS[1][1], c["title"], re.I) else field_of(c["title"], c["org"]))
     confs.sort(key=lambda e: (e["start"], e["title"]))
+
+    # where they are: one dot per place on the world map
+    geo = geomap.geocode_all({c["location"] for c in confs if c.get("location")}, se.get)
+    points: dict[str, list] = {}
+    for c in confs:
+        g = geo.get(c.get("location", ""))
+        if g:
+            c["place_key"] = geomap.place_key(g[2])
+            points.setdefault(g[2], [g[0], g[1], 0])[2] += 1
+    unmapped = sum(1 for c in confs if not c.get("place_key"))
     series = list(csv.DictReader((CONTENT / "conference_series.csv").open(encoding="utf-8-sig")))
 
     # ---- home
@@ -502,10 +515,11 @@ def build(scraped: list[dict], errors: dict):
 </div></section>
 
 <section class="band"><div class="wrap">
-  <div><h2>Work with Liverpool's next nuclear workforce</h2>
-    <p>Give a talk, host a site visit or sponsor the summer school. Our members work across radiation detection
-      and protection, fusion, reactor physics, materials, decommissioning, nuclear medicine and policy.</p></div>
-  <div class="actions"><a class="btn btn-navy" href="partners.html">Partner with us</a></div>
+  <div><h2>Could you give one talk?</h2>
+    <p>Our members work across radiation detection and protection, fusion, reactor physics, materials,
+      decommissioning, nuclear medicine and policy, and they'd love to hear from you. A single talk, a visit or a
+      shared opportunity all help, with no commitment beyond that.</p></div>
+  <div class="actions"><a class="btn btn-navy" href="partners.html">Work with us</a></div>
 </div></section>
 """
     write("index.html", layout("index.html", CFG["name"], home, CFG["tagline"] + " A student-led network hosted by the Chadwick Institute for Nuclear Innovation."))
@@ -549,10 +563,17 @@ def build(scraped: list[dict], errors: dict):
     cf += f"""
 <section class="section"><div class="wrap" data-filter-list>
   <div class="sec-head"><h2>{TRAIL}Upcoming</h2></div>
-  <p class="lead-in">From the IAEA's open meetings, the UK groups' listings and conferences our committee adds.
-    IAEA technical meetings, which need a nomination, are left out.</p>
+  <p class="lead-in">From the IAEA, the American Nuclear Society, the IEEE Nuclear and Plasma Sciences Society, the
+    European Physical Society, the UK groups' listings, and conferences our committee adds. IAEA technical meetings,
+    which need a nomination, are left out.</p>
+  <figure class="map">{geomap.map_svg(points)}
+    <figcaption class="small muted">{sum(v[2] for v in points.values())} conferences in {len(points)} places. Select a dot to
+      see what's on there.{f" {unmapped} more are online or haven't named a place yet." if unmapped else ""}
+      Map: Natural Earth. Places: GeoNames, via Open-Meteo (CC BY 4.0).</figcaption></figure>
   <div class="tools">{chips([(FIELD_KEYS.get(f, 'other'), f) for f in present_f], "Filter by field")}
     <label class="search"><span class="small muted">Search</span><input type="search" data-search placeholder="Title, place or organiser"></label></div>
+  <p class="place-note hidden" id="map-list" data-place-note>Showing conferences in <strong data-place-name></strong>.
+    <button type="button" class="link-btn" data-place-clear>Show every place</button></p>
   <p class="count"><span data-shown>{len(confs)}</span> conferences</p>
   {grouped(crow)}
   <p class="empty hidden" data-none>Nothing matches. Try another field or clear the search.</p>
@@ -627,39 +648,47 @@ def build(scraped: list[dict], errors: dict):
 <section class="section"><div class="wrap"><div class="prose"><p>Questions first?</p>{email_block()}</div></div></section>"""
     write("join.html", layout("join.html", "Join the network", jn, "Join the Chadwick Institute Young Nuclear Network: free for nuclear researchers at Liverpool.", "join.html"))
 
-    # ---- partners
-    pt = page_head("Partner with us", "Meet the North West's next nuclear workforce. Organisations can support Liverpool's nuclear PGRs and postdocs at three levels.")
+    # ---- partners: flexible, one-off help is as welcome as anything longer
+    ways = [
+        ("Give a talk", "One talk, once. Your work, your career, or where your field is going; 30 to 60 minutes, in person or online."),
+        ("Run a workshop or careers session", "A hands-on session, a CV clinic, or an honest look at what working in your organisation is like."),
+        ("Host a visit", "Show a small group around your site, lab or office. We'll handle names for security checks well ahead."),
+        ("Share an opportunity", "Placements, internships, jobs, PhDs or events. Send them over and we'll pass them on."),
+        ("Mentor someone", "An occasional conversation with a PhD student or postdoc thinking about their next step."),
+        ("Support an event", "Refreshments, a prize for a student talk, or help with a student's travel. Small things make a big difference."),
+        ("Help with the summer school", "Teach a session, lend kit, or support a place for a student who couldn't otherwise come."),
+    ]
+    way_list = "".join(f"<li><strong>{esc(t)}</strong><span>{esc(d)}</span></li>" for t, d in ways)
+    pt = page_head("Work with us", "Whether you can give one talk or would like to do more over time, we'd love to hear from you. "
+                   "There's no fee, no minimum and no yearly commitment: just whatever suits you.")
     pt += f"""
 <section class="section"><div class="wrap">
-  <div class="sec-head"><h2>{TRAIL}Partnership levels</h2></div>
-  <div class="table-wrap"><table>
-    <thead><tr><th scope="col">Level</th><th scope="col">You contribute</th><th scope="col">You receive</th></tr></thead>
-    <tbody>
-      <tr><th scope="row">Supporter</th><td data-label="You contribute">One talk, workshop or careers session a year; share opportunities (placements, jobs, events) with members.</td>
-        <td data-label="You receive">Your logo on our website and newsletter; your opportunities circulated to members; an invitation to Partner Day.</td></tr>
-      <tr><th scope="row">Partner<small>indicatively £250 to £1,000, or in kind</small></th><td data-label="You contribute">As above, plus a site visit and/or sponsorship, such as catering, prizes or travel bursaries.</td>
-        <td data-label="You receive">As above, plus a named event, a stand at Partner Day or the summer school, and recognition in our annual report.</td></tr>
-      <tr><th scope="row">Strategic partner<small>indicatively £1,000+, or equivalent</small></th><td data-label="You contribute">Substantial in-kind or cash support, such as an equipment or software loan, co-delivering the summer school, or sponsoring bursaries.</td>
-        <td data-label="You receive">As above, plus a seat on our Industry and Professional Bodies Advisory Board and co-branding of flagship events.</td></tr>
-    </tbody></table></div>
+  <div class="sec-head"><h2>{TRAIL}Ways to help</h2></div>
+  <p class="lead-in">Do as much or as little as you like. Most people start with a single talk, and that alone means a lot to
+    our members.</p>
+  <ul class="ways">{way_list}</ul>
 </div></section>
 <section class="section"><div class="wrap cols">
   <div><h2>{TRAIL}How it works</h2><ol class="steps">
-    <li><span>Register your interest. Tell us which level suits you, or that you'd like to talk it through.</span></li>
-    <li><span>We agree a one-page letter setting out what each side provides, how your brand is used, data protection and duration (12 months, renewable).</span></li>
-    <li><span>Money and legal matters go through the University: sponsorship is paid to a Chadwick Institute cost centre against an invoice, and larger agreements are handled by the University's contracts team.</span></li>
-    <li><span>At the end of each year you receive a short summary of what your support made possible.</span></li></ol></div>
-  <div><h2>{TRAIL}Our commitments</h2><ul class="checks">
-    <li><strong>Data protection.</strong> We circulate your opportunities to members; we never share members' personal data with partners.</li>
-    <li><strong>Independence.</strong> Sponsorship does not buy influence over research, teaching or the network's views, and we are open about who supports us.</li>
-    <li><strong>Brand use.</strong> We use your logo only as agreed and following your guidelines.</li></ul></div>
+    <li><span>Tell us what you have in mind, using the form below or by email. A rough idea is plenty.</span></li>
+    <li><span>We'll get back to you within a week to find a date and format that suit you.</span></li>
+    <li><span>We look after the room, the audience and the publicity. You just turn up, or join online.</span></li>
+    <li><span>Afterwards we'll let you know how it went, and say thank you properly.</span></li></ol>
+    <p class="small muted">If you'd like to give money or equipment, it goes through the Chadwick Institute at the University of
+      Liverpool so it is handled properly, and we'll agree in a short note what it's for.</p></div>
+  <div><h2>{TRAIL}What we'll do in return</h2><ul class="checks">
+    <li>Thank you publicly, on this website and LinkedIn, if you'd like us to.</li>
+    <li>Introduce you to members working in your area.</li>
+    <li>Share your opportunities with people who are looking for them.</li>
+    <li>Keep members' personal details private: we never pass them on.</li>
+    <li>Stay independent: support never buys influence over research, teaching or what the network says, and we're open about who helps us.</li></ul></div>
 </div></section>
 <section class="form-band" id="register"><div class="wrap">
-  <div class="form-intro"><h2>Register your interest</h2><p>Tell us about your organisation and what you'd like to offer.
-    We'll reply within a week.</p></div>
-  {mail_form("partner", "Partner interest", "Organisation", PARTNER_FIELDS, "Write the email")}
+  <div class="form-intro"><h2>Get in touch</h2><p>Tell us a little about yourself and what you'd like to do. Tick as many
+    or as few as you like; we'll reply within a week.</p></div>
+  {mail_form("partner", "Getting involved", "Organisation", PARTNER_FIELDS, "Write the email")}
 </div></section>"""
-    write("partners.html", layout("partners.html", "Partner with us", pt, "Partner with the Chadwick Institute Young Nuclear Network: talks, site visits, sponsorship and the summer school.", "partners.html"))
+    write("partners.html", layout("partners.html", "Work with us", pt, "Give a one-off talk, host a visit or help in another way: work with the Chadwick Institute Young Nuclear Network.", "partners.html"))
 
     # ---- about
     ab = page_head("About the network", f"{esc(CFG['tagline'])}")
@@ -701,7 +730,7 @@ def build(scraped: list[dict], errors: dict):
   <h2>Signing up</h2>
   <p>The forms on this website don't send or store anything themselves: pressing the button opens your own
     email app with a message to the network's mailbox, and nothing reaches us until you send it. We ask only for what
-    we need to run the network: your name, email, department and interests (or, for partners, your organisation and
+    we need to run the network: your name, email, department and interests (or, if you'd like to work with us, your organisation and
     contact details). Your details are seen only by the student committee, used only to tell you about the network's events
     and opportunities, and never shared with partners or anyone else. We follow the University of Liverpool's data
     protection policy.</p>

@@ -19,15 +19,24 @@
     var chips = box.querySelectorAll('.chips button'), rows = box.querySelectorAll('[data-tags]');
     var months = box.querySelectorAll('[data-month-head]'), search = box.querySelector('[data-search]');
     var shown = box.querySelector('[data-shown]'), none = box.querySelector('[data-none]');
-    var value = 'all';
+    var value = 'all', place = '';
+    var dots = box.querySelectorAll('[data-place-btn]'), note = box.querySelector('[data-place-note]');
     function apply() {
-      var q = search ? search.value.trim().toLowerCase() : '', n = 0;
+      var q = search ? search.value.trim().toLowerCase() : '', n = 0, live = {};
       rows.forEach(function (r) {
-        var on = (value === 'all' || r.dataset.tags.split(' ').indexOf(value) >= 0) &&
-                 (!q || r.textContent.toLowerCase().indexOf(q) >= 0);
+        var byField = (value === 'all' || r.dataset.tags.split(' ').indexOf(value) >= 0) &&
+                      (!q || r.textContent.toLowerCase().indexOf(q) >= 0);
+        var on = byField && (!place || r.dataset.place === place);
+        if (byField && r.dataset.place) live[r.dataset.place] = true;
         r.classList.toggle('hidden', !on);
         if (on) n++;
       });
+      // map: dim places with nothing under the current field and search; mark the chosen one
+      dots.forEach(function (d) {
+        d.classList.toggle('dim', !live[d.dataset.placeBtn]);
+        d.classList.toggle('on', d.dataset.placeBtn === place);
+      });
+      if (note) note.classList.toggle('hidden', !place);
       months.forEach(function (m) {
         m.classList.toggle('hidden', !box.querySelector('[data-month="' + m.dataset.monthHead + '"]:not(.hidden)'));
       });
@@ -42,6 +51,18 @@
       });
     });
     if (search) search.addEventListener('input', apply);
+    dots.forEach(function (d) {
+      d.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        place = place === d.dataset.placeBtn ? '' : d.dataset.placeBtn;     // a second click shows every place again
+        if (note) note.querySelector('[data-place-name]').textContent = d.dataset.label;
+        apply();
+        var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (place && note) note.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'nearest' });
+      });
+    });
+    var clear = box.querySelector('[data-place-clear]');
+    if (clear) clear.addEventListener('click', function () { place = ''; apply(); });
   });
 
   // Email forms: on Send, check the boxes, then open the visitor's email app with the message written out.
