@@ -182,7 +182,66 @@ def map_svg(points: dict) -> str:
         e = html.escape(label)
         dots.append(f'<a href="#map-list" class="dot" data-place-btn="{place_key(label)}" data-label="{e}" '
                     f'aria-label="{e}: {what}"><title>{e}: {what}</title>'
-                    f'<circle cx="{x}" cy="{y}" r="{r + 6}" class="hit"/><circle cx="{x}" cy="{y}" r="{r}"/>'
-                    + (f'<text x="{x}" y="{y + 4}">{n}</text>' if n > 1 else "") + "</a>")
-    return (f'<svg viewBox="0 0 {WIDTH:g} {HEIGHT:g}" role="group" aria-label="World map of upcoming conferences">'
-            f'<path class="land" d="{land_path()}"/>{"".join(dots)}</svg>')
+                    f'<circle cx="{x}" cy="{y}" r="{r + 6}" data-r="{r + 6}" class="hit"/>'
+                    f'<circle cx="{x}" cy="{y}" r="{r}" data-r="{r}"/>'
+                    + (f'<text x="{x}" y="{y + 4}" data-fs="10" data-dy="4">{n}</text>' if n > 1 else "") + "</a>")
+    return (f'<div class="map-frame"><svg viewBox="0 0 {WIDTH:g} {HEIGHT:g}" data-zoomable role="group" '
+            f'aria-label="World map of upcoming conferences. Scroll or pinch to zoom, drag to move.">'
+            f'<path class="land" d="{land_path()}"/>{facilities_layer()}<g class="dots">{"".join(dots)}</g></svg>'
+            '<div class="map-zoom" role="group" aria-label="Zoom">'
+            '<button type="button" data-zoom="in" aria-label="Zoom in">+</button>'
+            '<button type="button" data-zoom="out" aria-label="Zoom out">&minus;</button>'
+            '<button type="button" data-zoom="reset" aria-label="Show the whole world">World</button></div></div>')
+
+
+# --------------------------------------------------------------------------- facilities (optional layer)
+FACILITIES = HERE / "content" / "facilities.json"
+FAC_TYPES = [   # (key, label shown in the legend)
+    ("lab", "Nuclear physics and accelerator labs"),
+    ("research", "Research reactors"),
+    ("fusion", "Fusion devices"),
+    ("medical", "Proton and ion therapy"),
+    ("power", "Nuclear power stations"),
+    ("fuel", "Fuel cycle, waste and decommissioning"),
+]
+
+
+def load_facilities() -> list[dict]:
+    try:
+        return json.loads(FACILITIES.read_text(encoding="utf-8")).get("facilities", [])
+    except (OSError, ValueError):
+        return []
+
+
+def facilities_layer() -> str:
+    """Small markers, one group per type, drawn under the conference dots. Each links to its Wikipedia or
+    Wikidata page."""
+    facs = load_facilities()
+    if not facs:
+        return ""
+    groups = []
+    for key, _ in FAC_TYPES:
+        marks = []
+        for f in (f for f in facs if f.get("type") == key):
+            x, y = project(f["lon"], f["lat"])
+            bits = [f.get("name", "")] + [b for b in (f.get("status"), f.get("country")) if b]
+            tip = html.escape(", ".join(bits))
+            url = html.escape(f.get("url", ""))
+            marks.append(f'<a href="{url}" target="_blank" rel="noopener noreferrer" aria-label="{tip}"><title>{tip}</title>'
+                         f'<circle cx="{x}" cy="{y}" r="2.6" data-r="2.6"/></a>')
+        if marks:
+            groups.append(f'<g class="fac fac-{key}" data-fac="{key}">{"".join(marks)}</g>')
+    return f'<g class="facs">{"".join(groups)}</g>'
+
+
+def facilities_legend() -> str:
+    facs = load_facilities()
+    counts = {k: sum(1 for f in facs if f.get("type") == k) for k, _ in FAC_TYPES}
+    if not any(counts.values()):
+        return ""
+    boxes = "".join(
+        f'<label class="fac-key fac-{k}"><input type="checkbox" data-fac-toggle="{k}" checked>'
+        f'<i aria-hidden="true"></i> {html.escape(label)} <span class="muted">({counts[k]})</span></label>'
+        for k, label in FAC_TYPES if counts[k])
+    return (f'<fieldset class="fac-legend"><legend>Also on the map</legend>{boxes}'
+            f'<span class="fac-key conf-key"><i aria-hidden="true"></i> Conferences (the number is how many)</span></fieldset>')

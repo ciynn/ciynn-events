@@ -119,6 +119,230 @@
     });
   });
 
+  // Zoomable map: wheel or pinch to zoom, drag to move, buttons for keyboard and phones. Markers keep their
+  // size on screen as you zoom, so close-together places separate.
+  document.querySelectorAll('svg[data-zoomable]').forEach(function (svg) {
+    var frame = svg.parentNode, box = svg.getAttribute('viewBox').split(/[\s,]+/).map(Number);
+    var W = box[2], H = box[3], vb = { x: 0, y: 0, w: W, h: H }, MAX = 8;
+    var sized = svg.querySelectorAll('[data-r], [data-fs]'), pending = false, dragged = false;
+    function draw() {
+      pending = false;
+      svg.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h);
+      var k = W / vb.w, s = 1 / Math.pow(k, 0.75);        // markers shrink a little less than the map grows
+      sized.forEach(function (el) {
+        if (el.dataset.r) el.setAttribute('r', (el.dataset.r * s).toFixed(2));
+        if (el.dataset.fs) el.style.fontSize = (el.dataset.fs * s).toFixed(2) + 'px';
+      });
+      svg.querySelectorAll('text[data-dy]').forEach(function (t) {
+        t.setAttribute('transform', 'translate(0 ' + (-(t.dataset.dy) * (1 - s)).toFixed(2) + ')');
+      });
+      svg.style.touchAction = k > 1.01 ? 'none' : 'pan-y';   // at full size, let the page scroll over the map
+      frame.classList.toggle('zoomed', k > 1.01);
+    }
+    function redraw() { if (!pending) { pending = true; requestAnimationFrame(draw); } }
+    function clamp() {
+      vb.w = Math.min(W, Math.max(W / MAX, vb.w)); vb.h = vb.w * H / W;
+      vb.x = Math.min(W - vb.w, Math.max(0, vb.x)); vb.y = Math.min(H - vb.h, Math.max(0, vb.y));
+    }
+    function point(cx, cy) {                               // screen point -> map coordinates
+      var r = svg.getBoundingClientRect();
+      return { x: vb.x + (cx - r.left) / r.width * vb.w, y: vb.y + (cy - r.top) / r.height * vb.h, fx: (cx - r.left) / r.width, fy: (cy - r.top) / r.height };
+    }
+    function zoomAt(factor, cx, cy) {
+      var r = svg.getBoundingClientRect();
+      var p = cx === undefined ? { x: vb.x + vb.w / 2, y: vb.y + vb.h / 2, fx: .5, fy: .5 } : point(cx, cy);
+      vb.w /= factor; vb.h = vb.w * H / W;
+      vb.x = p.x - p.fx * vb.w; vb.y = p.y - p.fy * vb.h;
+      clamp(); redraw();
+    }
+    svg.addEventListener('wheel', function (ev) {
+      if (!ev.ctrlKey && W / vb.w <= 1.01 && ev.deltaY > 0) return;   // zooming out at full size: scroll the page
+      ev.preventDefault();
+      zoomAt(Math.exp(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0018)), ev.clientX, ev.clientY);
+    }, { passive: false });
+    var pointers = {}, last = null, pinch = null, startXY = null;
+    svg.addEventListener('pointerdown', function (ev) {
+      pointers[ev.pointerId] = ev; dragged = false; startXY = [ev.clientX, ev.clientY];
+      var ids = Object.keys(pointers);
+      if (ids.length === 2) {
+        var a = pointers[ids[0]], b = pointers[ids[1]];
+        pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) };
+      } else { last = [ev.clientX, ev.clientY]; }
+    });
+    svg.addEventListener('pointermove', function (ev) {
+      if (!pointers[ev.pointerId]) return;
+      pointers[ev.pointerId] = ev;
+      var ids = Object.keys(pointers);
+      if (ids.length === 2 && pinch) {
+        var a = pointers[ids[0]], b = pointers[ids[1]], d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        if (d > 0) zoomAt(d / pinch.d, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+        pinch.d = d; dragged = true; return;
+      }
+      if (!last || W / vb.w <= 1.01) return;
+      if (Math.hypot(ev.clientX - startXY[0], ev.clientY - startXY[1]) > 4) {
+        if (!dragged) svg.setPointerCapture(ev.pointerId);
+        dragged = true;
+      }
+      if (!dragged) return;
+      var r = svg.getBoundingClientRect();
+      vb.x -= (ev.clientX - last[0]) / r.width * vb.w; vb.y -= (ev.clientY - last[1]) / r.height * vb.h;
+      last = [ev.clientX, ev.clientY]; clamp(); redraw();
+    });
+    function up(ev) { delete pointers[ev.pointerId]; if (Object.keys(pointers).length < 2) pinch = null; last = null; }
+    svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+    svg.addEventListener('click', function (ev) { if (dragged) { ev.preventDefault(); ev.stopPropagation(); dragged = false; } }, true);
+    frame.querySelectorAll('[data-zoom]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.dataset.zoom === 'in') zoomAt(1.8);
+        else if (b.dataset.zoom === 'out') zoomAt(1 / 1.8);
+        else { vb = { x: 0, y: 0, w: W, h: H }; redraw(); }
+      });
+    });
+    // facility layers on and off
+    var fig = frame.closest('figure') || document;
+    fig.querySelectorAll('[data-fac-toggle]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var g = svg.querySelector('[data-fac="' + cb.dataset.facToggle + '"]');
+        if (g) g.classList.toggle('hidden', !cb.checked);
+      });
+    });
+    draw();
+  });
+
+  // "For you": suggestions from what the visitor told us, or (if they opted in) what they open. Everything is kept
+  // in this browser's local storage under one key; nothing is sent anywhere. "Forget me" removes it.
+  var KEY = 'ciynn-for-you', css = document.querySelector('link[href$="assets/style.css"]');
+  var root = css ? css.getAttribute('href').replace('assets/style.css', '') : '';     // '' or '../' on sub-pages
+  function loadPrefs() { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { return null; } }
+  function savePrefs(p) { try { localStorage.setItem(KEY, JSON.stringify(p)); return true; } catch (e) { return false; } }
+  function forget() { try { localStorage.removeItem(KEY); } catch (e) {} }
+  var prefs = loadPrefs();
+  var NEAR = { uk: ['uk', 'online'], europe: ['uk', 'europe', 'online'], online: ['online'] };
+  var ROLE_WORDS = { undergrad: /student|undergraduate|summer school|school on|graduate|careers?|ygn/i,
+                     pgr: /phd|school|workshop|symposium|conference|student|early.career/i,
+                     postdoc: /conference|symposium|workshop|fellowship|congress/i,
+                     industry: /industry|supply chain|ygn|networking|nuclear institute|nia|professional/i,
+                     staff: /conference|symposium|congress|workshop/i };
+
+  function score(item, p, fieldNames, now) {
+    var why = [], s = 0, interests = p.interests || [], w = p.weights || {};
+    item.fields.filter(function (f, i, all) { return all.indexOf(f) === i; }).forEach(function (f) {
+      if (interests.indexOf(f) >= 0) { s += 3; why.push(fieldNames[f] || f); }
+      else if (p.learn && w[f]) { s += Math.min(w[f], 6) * 0.5; if (w[f] >= 2) why.push('you often open ' + (fieldNames[f] || f).toLowerCase()); }
+    });
+    if (s === 0 && item.kind !== 'ours') return null;           // nothing in common: don't suggest it
+    var near = NEAR[p.travel];
+    if (near && near.indexOf(item.region) < 0) return null;     // somewhere they said they wouldn't go
+    if (item.kind === 'ours') { s += 2; why.unshift('our own event'); }
+    if (p.role && ROLE_WORDS[p.role] && ROLE_WORDS[p.role].test(item.title)) s += 1;
+    if (item.start) {
+      var days = (new Date(item.start) - now) / 864e5;
+      if (days < -1 && item.kind !== 'news') return null;
+      if (item.kind === 'news') s += days > -21 ? 0.5 : -1;
+      else if (days < 45) { s += 1; why.push('coming up soon'); }
+    }
+    return { s: s, why: why };
+  }
+
+  function renderSuggestions(data) {
+    var lists = document.querySelectorAll('[data-suggestions]');
+    if (!lists.length) return;
+    var ready = prefs && ((prefs.interests && prefs.interests.length) || (prefs.learn && prefs.weights && Object.keys(prefs.weights).length));
+    document.querySelectorAll('[data-foryou-invite]').forEach(function (el) { el.classList.toggle('hidden', !!ready); });
+    lists.forEach(function (list) {
+      list.textContent = '';
+      if (!ready) {
+        if (list.closest('[data-foryou-page]')) list.innerHTML = '<p class="empty">Choose a few interests above and we’ll suggest things here.</p>';
+        return;
+      }
+      var now = new Date(), picks = [];
+      data.items.forEach(function (it) { var r = score(it, prefs, data.fields, now); if (r) picks.push({ it: it, r: r }); });
+      picks.sort(function (a, b) { return b.r.s - a.r.s || (a.it.start || '9').localeCompare(b.it.start || '9'); });
+      picks = picks.slice(0, +list.dataset.limit || 10);
+      if (!picks.length) {
+        list.innerHTML = '<p class="empty">Nothing matches right now. Try adding an interest, or travelling a bit further.</p>';
+        return;
+      }
+      var KIND = { ours: 'Our event', event: 'Event', conference: 'Conference', opportunity: 'Opportunity', news: 'News' };
+      picks.forEach(function (p) {
+        var it = p.it, a = document.createElement('article'), url = /^https?:/.test(it.url) ? it.url : root + it.url;
+        a.className = 'row suggestion';
+        var d = it.start ? new Date(it.start + 'T12:00:00') : null;
+        var box = document.createElement('div'); box.className = 'date'; box.setAttribute('aria-hidden', 'true');
+        box.innerHTML = d ? '<b></b><span></span>' : '<b>&middot;</b><span></span>';
+        if (d) { box.querySelector('b').textContent = d.getDate(); box.querySelector('span').textContent = d.toLocaleString('en-GB', { month: 'short' }); }
+        var body = document.createElement('div'), h = document.createElement('h3'), link = document.createElement('a');
+        link.href = url; link.textContent = it.title; link.dataset.fields = it.fields.join(' ');
+        if (/^https?:/.test(it.url)) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+        h.appendChild(link);
+        var meta = document.createElement('div'); meta.className = 'meta';
+        var kind = document.createElement('span'); kind.className = 'org'; kind.textContent = KIND[it.kind] || it.kind; meta.appendChild(kind);
+        if (it.place) { var pl = document.createElement('span'); pl.textContent = it.place; meta.appendChild(pl); }
+        if (p.r.why.length) { var w = document.createElement('span'); w.className = 'why'; w.textContent = 'Because: ' + p.r.why.slice(0, 2).join(', '); meta.appendChild(w); }
+        body.appendChild(h); body.appendChild(meta);
+        a.appendChild(box); a.appendChild(body); list.appendChild(a);
+      });
+    });
+  }
+
+  function markRows() {                          // "Suits you" on rows elsewhere on the site
+    if (!prefs || !prefs.interests || !prefs.interests.length) return;
+    document.querySelectorAll('.row[data-fields]').forEach(function (r) {
+      var hit = r.dataset.fields.split(' ').some(function (f) { return prefs.interests.indexOf(f) >= 0; });
+      if (hit && !r.querySelector('.suits')) {
+        var m = document.createElement('span'); m.className = 'suits'; m.textContent = 'Suits you';
+        var meta = r.querySelector('.meta'); if (meta) meta.insertBefore(m, meta.firstChild);
+      }
+    });
+  }
+
+  // learning (opt-in): count the subjects of what the visitor opens
+  document.addEventListener('click', function (ev) {
+    if (!prefs || !prefs.learn) return;
+    var a = ev.target.closest && ev.target.closest('a');
+    if (!a) return;
+    var holder = a.dataset.fields ? a : a.closest('[data-fields]');
+    if (!holder) return;
+    prefs.weights = prefs.weights || {};
+    holder.dataset.fields.split(' ').forEach(function (f) { if (f) prefs.weights[f] = (prefs.weights[f] || 0) + 1; });
+    savePrefs(prefs);
+  }, true);
+
+  // the For you page: the settings form
+  var form = document.querySelector('[data-prefs]');
+  if (form) {
+    var fld = function (n) { return form.querySelector('[name="' + n + '"]'); };
+    if (prefs) {
+      (prefs.interests || []).forEach(function (v) { var c = form.querySelector('input[name="interest"][value="' + v + '"]'); if (c) c.checked = true; });
+      if (prefs.role) fld('role').value = prefs.role;
+      if (prefs.travel) fld('travel').value = prefs.travel;
+      fld('learn').checked = !!prefs.learn;
+    }
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var p = { v: 1, interests: Array.prototype.map.call(form.querySelectorAll('input[name="interest"]:checked'), function (c) { return c.value; }),
+                role: fld('role').value, travel: fld('travel').value, learn: fld('learn').checked,
+                weights: fld('learn').checked && prefs ? (prefs.weights || {}) : {} };
+      var ok = savePrefs(p); prefs = p;
+      var msg = form.querySelector('[data-saved]');
+      msg.textContent = ok ? 'Saved in this browser.' : 'This browser won’t let the site save anything (private mode?), so your choices last only until you leave the page.';
+      msg.classList.remove('hidden');
+      if (window.__forYouData) renderSuggestions(window.__forYouData);
+    });
+    form.querySelector('[data-forget]').addEventListener('click', function () {
+      forget(); prefs = null; form.reset();
+      var msg = form.querySelector('[data-saved]'); msg.textContent = 'Forgotten: nothing about you is stored in this browser now.'; msg.classList.remove('hidden');
+      if (window.__forYouData) renderSuggestions(window.__forYouData);
+    });
+  }
+
+  if (document.querySelector('[data-suggestions]')) {
+    fetch(root + 'items.json').then(function (r) { return r.json(); }).then(function (data) {
+      window.__forYouData = data; renderSuggestions(data);
+    }).catch(function () {});
+  }
+  markRows();
+
   // Copy buttons next to an address shown as text
   document.querySelectorAll('[data-copy]').forEach(function (b) {
     b.addEventListener('click', function () {

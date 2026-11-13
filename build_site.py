@@ -170,13 +170,13 @@ TRAIL = '<span class="trail" aria-hidden="true"><i></i><i></i><i></i><i></i></sp
 
 NAV = [("index.html", "Home"), ("events.html", "Events"), ("conferences.html", "Conferences"),
        ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"),
-       ("partners.html", "Work with us"), ("about.html", "About")]
+       ("partners.html", "Work with us"), ("about.html", "About"), ("for-you.html", "For you")]
 
 sys.path.insert(0, str(HERE))
 import geomap  # noqa: E402  (the conference map)
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
-       "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; object-src 'none'; "
+       "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; "
        "base-uri 'self'; form-action 'none'")
 
 FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&"
@@ -364,6 +364,35 @@ ORG_FIELD = {"IPEM": "Nuclear medicine and medical physics", "SRP": "Radiation p
 CONF_WORDS = re.compile(r"conference|congress|symposium|summer school|school on|workshop|annual meeting|forum", re.I)
 
 
+CAREERS = re.compile(r"career|\bcv\b|skills|chartership|professional|mentor|network(ing)?\b|jobs?\b|phd|student|early.career|graduate|ygn|leadership", re.I)
+EUROPE = set("""albania andorra austria belgium bosnia bulgaria croatia cyprus czech denmark estonia finland france germany greece
+hungary iceland ireland italy latvia liechtenstein lithuania luxembourg malta moldova monaco montenegro netherlands norway
+poland portugal romania serbia slovakia slovenia spain sweden switzerland ukraine""".split())
+N_AMERICA = {"united states", "canada", "mexico"}
+
+
+def interests_of(text: str, org: str = "") -> list[str]:
+    keys = [FIELD_KEYS[name] for name, rx in FIELDS if re.search(rx, text, re.I)]
+    if not keys and org.split(" / ")[0] in ORG_FIELD:
+        keys = [FIELD_KEYS[ORG_FIELD[org.split(" / ")[0]]]]
+    if CAREERS.search(text):
+        keys.append("careers")
+    return keys
+
+
+def region_of(country: str, location: str = "") -> str:
+    c = (country or "").lower()
+    if re.search(r"online|virtual|webinar|teams|zoom", location or "", re.I):
+        return "online"
+    if c in ("united kingdom", "uk") or not c and not location:
+        return "uk"
+    if c.split()[0] in EUROPE if c else False:
+        return "europe"
+    if c in N_AMERICA:
+        return "namerica"
+    return "world" if c else "uk"
+
+
 def field_of(title: str, org: str = "") -> str:
     for name, rx in FIELDS:
         if re.search(rx, title, re.I):
@@ -405,6 +434,8 @@ def ext_row(e: dict, tags: str) -> str:
     field = f'<span>{esc(e["field"])}</span>' if e.get("field") else ""
     deadline = f'<span>Abstracts by {fmt(date_of(e["deadline"]))}</span>' if date_of(e.get("deadline", "")) else ""
     place = f' data-place="{esc(e["place_key"])}"' if e.get("place_key") else ""
+    keys = sorted(set(([FIELD_KEYS[e["field"]]] if e.get("field") in FIELD_KEYS else []) + interests_of(e["title"] + " " + e.get("category", ""), e["org"])))
+    place += f' data-fields="{" ".join(keys)}"' if keys else ""
     return (f'<article class="row" data-month="{month}" data-tags="{esc(tags)}"{place}>{date_box(s, f)}<div>'
             f'<h3><a href="{esc(e["url"])}"{ext(e["url"])}>{esc(e["title"])}</a></h3>'
             f'<div class="meta">{chips}<span>{span(s, f)}</span>{loc}{field}{deadline}</div></div></article>')
@@ -498,6 +529,14 @@ def build(scraped: list[dict], errors: dict):
   {own_row or '<p class="empty">Our next event will be announced soon. Join the network to hear first.</p>'}
 </div></section>
 
+<section class="section foryou-home" data-foryou-home><div class="wrap">
+  <div class="sec-head"><h2>{TRAIL}Picked for you</h2><a href="for-you.html">Change what you see</a></div>
+  <div class="list" data-suggestions data-limit="5"></div>
+  <div class="note" data-foryou-invite><p><strong>Want suggestions?</strong> Tell us what you're into, and the site will
+    pick the events, conferences and opportunities most likely to suit you. It's kept only in your browser.</p>
+    <div class="actions"><a class="btn btn-navy" href="for-you.html">Choose my interests</a></div></div>
+</div></section>
+
 <section class="section"><div class="wrap">
   <div class="sec-head"><h2>{TRAIL}Across the UK</h2><a href="events.html#digest">All {len(events)} events</a></div>
   <p class="lead-in">Talks, webinars and socials from the UK's nuclear membership groups, collected every week.</p>
@@ -569,7 +608,9 @@ def build(scraped: list[dict], errors: dict):
   <figure class="map">{geomap.map_svg(points)}
     <figcaption class="small muted">{sum(v[2] for v in points.values())} conferences in {len(points)} places. Select a dot to
       see what's on there.{f" {unmapped} more are online or haven't named a place yet." if unmapped else ""}
-      Map: Natural Earth. Places: GeoNames, via Open-Meteo (CC BY 4.0).</figcaption></figure>
+      Scroll, pinch or use the buttons to zoom; drag to move around. Map: Natural Earth. Places: GeoNames, via
+      Open-Meteo (CC BY 4.0).{" Facilities: Wikidata (CC0) and our own list; select one to read about it." if geomap.load_facilities() else ""}</figcaption>
+    {geomap.facilities_legend()}</figure>
   <div class="tools">{chips([(FIELD_KEYS.get(f, 'other'), f) for f in present_f], "Filter by field")}
     <label class="search"><span class="small muted">Search</span><input type="search" data-search placeholder="Title, place or organiser"></label></div>
   <p class="place-note hidden" id="map-list" data-place-note>Showing conferences in <strong data-place-name></strong>.
@@ -727,6 +768,11 @@ def build(scraped: list[dict], errors: dict):
   <p>This website does not use cookies, analytics or tracking of any kind, and it does not collect any personal data.
     It is hosted on GitHub Pages, which keeps standard server logs (such as IP addresses) for security; see GitHub's
     privacy statement. Fonts are loaded from Google Fonts.</p>
+  <h2>Suggestions "for you"</h2>
+  <p>If you choose interests on the <a href="for-you.html">For you</a> page, they are saved in your own browser (its local
+    storage), on that device only, so the site can show suggestions. If you also tick "learn from what I open", the
+    browser counts which subjects you open, again only on your device. None of it is sent to us or anyone else, and
+    "Forget me" deletes it. If you never use the page, nothing is stored.</p>
   <h2>Signing up</h2>
   <p>The forms on this website don't send or store anything themselves: pressing the button opens your own
     email app with a message to the network's mailbox, and nothing reaches us until you send it. We ask only for what
@@ -744,6 +790,63 @@ def build(scraped: list[dict], errors: dict):
     write("privacy.html", layout("privacy.html", "Privacy", pv, "How the Chadwick Institute Young Nuclear Network handles personal data."))
     nf = page_head("Page not found", 'That page has moved or never existed. Try the <a href="index.html">home page</a> or our <a href="events.html">events</a>.')
     write("404.html", layout("404.html", "Page not found", nf, "Page not found."))
+
+    # ---- items.json: what the "For you" suggestions choose from (read only by the visitor's own browser)
+    items = []
+    for e in own_up:
+        d = date_of(e.get("date")) or date_of(e.get("deadline"))
+        items.append({"kind": "ours", "title": e["title"], "url": f"events.html#{e.get('id') or e['slug']}",
+                      "start": d.isoformat() if d else "", "org": "Us", "region": "uk",
+                      "fields": interests_of(e["title"] + " " + e["body"][:400]) + ["ours"]})
+    for e in events:
+        items.append({"kind": "event", "title": e["title"], "url": e["url"], "start": e["start"], "org": e["org"],
+                      "region": region_of("", e.get("location", "") + " " + e.get("category", "")),
+                      "fields": interests_of(e["title"] + " " + e.get("category", ""), e["org"])})
+    for c in confs:
+        g = geo.get(c.get("location", "")) if c.get("location") else None
+        items.append({"kind": "conference", "title": c["title"], "url": c["url"], "start": c["start"], "org": c["org"],
+                      "place": g[2] if g else c.get("location", ""),
+                      "region": region_of(g[2].split(", ")[-1] if g else "", c.get("location", "")) if (g or c.get("location")) else "world",
+                      "fields": sorted(set([FIELD_KEYS.get(c["field"], "")] + interests_of(c["title"], c["org"])) - {""})})
+    for o in opps:
+        items.append({"kind": "opportunity", "title": o["title"], "url": "opportunities.html", "start": o.get("closes", ""),
+                      "org": o.get("organisation", ""), "region": "uk",
+                      "fields": sorted(set(interests_of(o["title"] + " " + o["body"]) + ["careers"]))})
+    for n in news[:12]:
+        items.append({"kind": "news", "title": n["title"], "url": f"news/{n['slug']}.html", "start": n.get("date", ""),
+                      "org": "News", "region": "uk", "fields": interests_of(n["title"] + " " + n.get("summary", "") + " " + n["body"][:600])})
+    (OUT / "items.json").write_text(json.dumps({"built": TODAY.isoformat(), "fields": {FIELD_KEYS[f]: f for f, _ in FIELDS} | {"careers": "Careers and skills"},
+                                                "items": items}, ensure_ascii=False), encoding="utf-8")
+
+    # ---- For you: the visitor tells us (or lets the site learn) what they're into; all of it stays in their browser
+    field_boxes = "".join(f'<label><input type="checkbox" name="interest" value="{FIELD_KEYS[f]}"> {esc(f)}</label>' for f, _ in FIELDS)
+    field_boxes += '<label><input type="checkbox" name="interest" value="careers"> Careers and skills</label>'
+    fy = page_head("For you", "Tell us what you're into and we'll pick the events, conferences and opportunities most likely to suit you. "
+                   "Your choices are kept only in this browser, on this device: we never see them.")
+    fy += f"""
+<section class="section"><div class="wrap foryou" data-foryou-page>
+  <form class="mailform prefs" data-prefs>
+    <fieldset class="field"><legend>I'm interested in</legend><div class="boxes">{field_boxes}</div></fieldset>
+    <div class="grid">
+      <label class="field"><span>I am</span><select name="role"><option value="">Rather not say</option>
+        <option value="undergrad">An undergraduate or MSc student</option><option value="pgr">A PhD student</option>
+        <option value="postdoc">A postdoc or researcher</option><option value="industry">Working in industry</option>
+        <option value="staff">University staff</option></select></label>
+      <label class="field"><span>I'd travel to</span><select name="travel"><option value="anywhere">Anywhere</option>
+        <option value="europe">The UK and Europe</option><option value="uk">The UK only</option><option value="online">Online only</option></select></label>
+    </div>
+    <label class="agree wide"><input type="checkbox" name="learn"> <span>Also learn from what I open on this site, to
+      improve my suggestions (kept only in this browser)</span></label>
+    <div class="actions"><button class="btn btn-navy" type="submit">Save and show my suggestions</button>
+      <button class="btn btn-line" type="button" data-forget>Forget me</button></div>
+    <p class="small muted hidden" role="status" data-saved>Saved in this browser.</p>
+  </form>
+  <div class="sec-head"><h2>{TRAIL}Suggested for you</h2></div>
+  <div class="list" data-suggestions data-limit="20"><p class="empty">Choose a few interests above and we'll suggest things here.</p></div>
+  <p class="small muted">How it works: each suggestion matches your interests, is somewhere you'd go, and is coming up soon.
+    Nothing is sent anywhere; "Forget me" deletes it all.</p>
+</div></section>"""
+    write("for-you.html", layout("for-you.html", "For you", fy, "Suggestions picked for your interests, kept only in your browser.", "for-you.html"))
 
     # ---- feeds and data
     items = "".join(

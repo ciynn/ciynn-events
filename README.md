@@ -18,6 +18,7 @@ database or passwords.
 | Opportunities | PhDs, jobs and placements; each drops off after its closing date | `content/opportunities/` |
 | Join | who it's for, what you get, the sign-up form | `build_site.py` (`JOIN_FIELDS`) |
 | Work with us | ways to help (one talk is as welcome as anything longer), how it works, what we do in return, the get-in-touch form | `build_site.py` (`ways`, `PARTNER_FIELDS`) |
+| For you | the visitor chooses interests, role and how far they'd travel (and can let the site learn from what they open); suggestions with reasons, and "Suits you" marks across the site | `items.json`, made by `build_site.py`; choices kept in the visitor's browser only |
 | About, Privacy | who we are, aims, how we're run, contact; how we handle data | `build_site.py` |
 
 Plus `feed.xml` (RSS for the news), `sitemap.xml`, `events.json` and `events.csv`.
@@ -104,6 +105,18 @@ Natural Earth 1:110m (public domain), kept in `content/world-land-110m.json`, in
 Each conference's place is looked up once with the Open-Meteo geocoding API (GeoNames data, CC BY 4.0) and
 saved in `content/geocache.json`; to correct a place, edit its entry there (`[latitude, longitude, "City,
 Country"]`, or `null` to leave it off the map). Online meetings and ones without a place are counted under the map.
+
+## For you (suggestions)
+
+`build_site.py` writes `site/items.json`: every upcoming event, conference, opportunity and recent news post, tagged
+with its fields, its region (UK, Europe, North America, elsewhere, online) and its kind. In the visitor's browser,
+`assets/site.js` scores each item against their choices (interests count most; then, if they opted in, the subjects
+they open most; then their role, how far they'd travel and how soon it is) and shows the best ones with the reason.
+The choices live in the browser's local storage under one key (`ciynn-for-you`), on that device only; nothing is
+sent anywhere, "Forget me" deletes it, and nothing is stored for visitors who never use the page. Because the
+visitor asks for it, this needs no cookie banner (it is "strictly necessary" for a service they requested).
+
+The map zooms with the scroll wheel, pinch or its + and - buttons, and drags when zoomed in.
 
 ## Safety
 
