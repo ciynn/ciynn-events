@@ -13,10 +13,17 @@
     });
   }
 
-  // Filterable lists: <div data-filter-list> with .chips buttons (data-value) and rows (data-tags),
+  // The lists are rebuilt once a week, so drop anything that has finished since, and any month left empty
+  var d0 = new Date(), today = d0.getFullYear() + '-' + ('0' + (d0.getMonth() + 1)).slice(-2) + '-' + ('0' + d0.getDate()).slice(-2);
+  document.querySelectorAll('[data-end]').forEach(function (r) { if (r.dataset.end < today) r.parentNode.removeChild(r); });
+  document.querySelectorAll('[data-month-head]').forEach(function (h) {
+    if (!document.querySelector('[data-month="' + h.dataset.monthHead + '"]')) h.parentNode.removeChild(h);
+  });
+
+  // Filterable lists: <div data-filter-list> with a drop-down (select[data-filter]) and rows (data-tags),
   // an optional search box (data-search) and month headings (data-month) that hide when empty
   document.querySelectorAll('[data-filter-list]').forEach(function (box) {
-    var chips = box.querySelectorAll('.chips button'), rows = box.querySelectorAll('[data-tags]');
+    var pick = box.querySelector('select[data-filter]'), rows = box.querySelectorAll('[data-tags]');
     var months = box.querySelectorAll('[data-month-head]'), search = box.querySelector('[data-search]');
     var shown = box.querySelector('[data-shown]'), none = box.querySelector('[data-none]');
     var value = 'all', place = '';
@@ -43,13 +50,7 @@
       if (shown) shown.textContent = n;
       if (none) none.classList.toggle('hidden', n > 0);
     }
-    chips.forEach(function (c) {
-      c.addEventListener('click', function () {
-        chips.forEach(function (x) { x.setAttribute('aria-pressed', String(x === c)); });
-        value = c.dataset.value;
-        apply();
-      });
-    });
+    if (pick) pick.addEventListener('change', function () { value = pick.value; apply(); });
     if (search) search.addEventListener('input', apply);
     dots.forEach(function (d) {
       d.addEventListener('click', function (ev) {
@@ -63,12 +64,17 @@
     });
     var clear = box.querySelector('[data-place-clear]');
     if (clear) clear.addEventListener('click', function () { place = ''; apply(); });
+    apply();                                               // counts and month headings after the clear-out above
   });
 
   // Email forms: on Send, check the boxes, then open the visitor's email app with the message written out.
   // The page itself sends and stores nothing: the visitor sees the email and sends it themselves.
   function copyText(text, button) {
-    var done = function () { var t = button.textContent; button.textContent = 'Copied'; setTimeout(function () { button.textContent = t; }, 1800); };
+    var done = function () {
+      var t = button.dataset.label || button.textContent; button.dataset.label = t;
+      button.textContent = 'Copied'; button.classList.add('done');
+      setTimeout(function () { button.textContent = t; button.classList.remove('done'); }, 1800);
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, function () { window.prompt('Copy this message:', text); });
     } else { window.prompt('Copy this message:', text); }
@@ -198,6 +204,20 @@
         else { vb = { x: 0, y: 0, w: W, h: H }; redraw(); }
       });
     });
+    // On a phone the whole world is too small to tap, so start framed on the conference dots
+    if (svg.getBoundingClientRect().width < 640) {
+      try {
+        var xs = [], ys = [];                                 // dot centres; the outer tenth either side is left out
+        svg.querySelectorAll('.dot').forEach(function (d) { var b = d.getBBox(); xs.push(b.x + b.width / 2); ys.push(b.y + b.height / 2); });
+        xs.sort(function (a, b) { return a - b; }); ys.sort(function (a, b) { return a - b; });
+        var q = function (v, f) { return v[Math.min(v.length - 1, Math.max(0, Math.round(f * (v.length - 1))))]; };
+        var x0 = q(xs, .1), x1 = q(xs, .9), y0 = q(ys, .1), y1 = q(ys, .9);
+        if (xs.length > 2 && x1 > x0) {
+          var k = Math.min(3, W / ((x1 - x0) * 1.3), H / ((y1 - y0) * 1.6 + 1));
+          if (k > 1.2) { vb.w = W / k; vb.h = H / k; vb.x = (x0 + x1) / 2 - vb.w / 2; vb.y = (y0 + y1) / 2 - vb.h / 2; clamp(); draw(); }
+        }
+      } catch (e) {}
+    }
     // facility layers on and off
     var fig = frame.closest('figure') || document;
     fig.querySelectorAll('[data-fac-toggle]').forEach(function (cb) {
@@ -281,8 +301,8 @@
     if (item.kind === 'ours') { s += 2; why.unshift('our own event'); }
     if (p.role && ROLE_WORDS[p.role] && ROLE_WORDS[p.role].test(item.title)) s += 1;
     if (item.start) {
-      var days = (new Date(item.start) - now) / 864e5;
-      if (days < -1 && item.kind !== 'news') return null;
+      var days = (new Date(item.start) - now) / 864e5, left = (new Date(item.end || item.start) - now) / 864e5;
+      if (left < -1 && item.kind !== 'news') return null;          // over (a conference that is still running stays)
       if (item.kind === 'news') s += days > -21 ? 0.5 : -1;
       else if (days < 45) { s += 1; why.push('coming up soon'); }
     }
@@ -421,8 +441,13 @@
   // Copy buttons next to an address shown as text
   document.querySelectorAll('[data-copy]').forEach(function (b) {
     b.addEventListener('click', function () {
-      var text = b.dataset.copy, done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
-      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+      var text = b.dataset.copy, label = b.querySelector('span') || b, was = label.textContent;
+      var done = function () { label.textContent = 'Copied'; b.classList.add('done'); setTimeout(function () { label.textContent = was; b.classList.remove('done'); }, 1800); };
+      var fallback = function () {                         // no clipboard: select the address so it can be copied by hand
+        var a = b.parentNode.querySelector('.mail-addr'); if (!a) return;
+        var r = document.createRange(); r.selectNodeContents(a); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
     });
   });
 })();

@@ -34,7 +34,7 @@ import requests
 from bs4 import BeautifulSoup
 
 HERE = Path(__file__).resolve().parent
-USER_AGENT = "CIYNN-events-digest/1.0 (Chadwick Institute Young Nuclear Network; ChadwickInstituteNetwork@outlook.com)"
+USER_AGENT = "CIYNN-events-digest/1.0 (+https://ciynn.github.io/ciynn-events/)"   # names the bot and where it comes from
 DELAY = 1.5          # seconds between requests to the same site
 TIMEOUT = 30
 TODAY = dt.date.today()
@@ -384,6 +384,56 @@ def scrape_eps():
         out.append(event("EPS", f.get("SUMMARY", ""), _ics_date(f["DTSTART"]), _ics_end(f),
                          location=f.get("LOCATION", ""), url=f.get("URL", ""), category="Conference"))
     return out
+
+
+# ---- opportunities: early-career posts in nuclear fields, from jobs.ac.uk's public search
+OPP_TOPIC = re.compile(r"nuclear|fusion|fission|radiation|radiolog|radioactiv|isotope|reactor|neutron|decommission|"
+                       r"medical physics|dosimetr|radiotherap|plasma|actinide|tritium", re.I)
+OPP_QUERIES = ("nuclear", "radiation", "fusion energy", "radiotherapy physics", "decommissioning", "nuclear medicine")
+OPP_LEVEL = re.compile(r"ph\.?d|studentship|doctoral|research (associate|assistant|fellow|engineer|scientist)|post-?doc|"
+                       r"fellowship|graduate|placement|internship|\bktp\b|knowledge transfer", re.I)
+OPP_NOT = re.compile(r"\bcells?\b|gene|chromatin|calcium|protein|receptor|envelope|\bpore\b|\bnmr\b|magnetic resonance|"
+                     r"immun|actinopteryg|fossil|lecturer|professor|head of|director|manager|\bchair\b|nuclear famil|cosmic|dark matter", re.I)
+
+
+def _opp_type(title: str) -> str:
+    if re.search(r"ph\.?d|studentship|doctoral", title, re.I):
+        return "PhD studentship"
+    if re.search(r"fellow", title, re.I):
+        return "Fellowship"
+    if re.search(r"placement|internship|graduate", title, re.I):
+        return "Placement"
+    return "Research post"
+
+
+def scrape_opportunities():
+    """jobs.ac.uk: PhD studentships, research posts, fellowships and placements in nuclear fields, still open."""
+    out, seen = {}, set()
+    for q in OPP_QUERIES:
+        page = soup("https://www.jobs.ac.uk/search/?keywords=" + requests.utils.quote(q))
+        for div in page.select("div.j-search-result__result"):
+            a = div.select_one(".j-search-result__text > a")
+            if not a:
+                continue
+            title, url = text(a), urljoin("https://www.jobs.ac.uk", a["href"])
+            if url in seen or not OPP_TOPIC.search(title) or not OPP_LEVEL.search(title) or OPP_NOT.search(title):
+                continue
+            seen.add(url)
+            closes = text(div.select_one(".j-search-result__date--blue"))
+            m = re.match(r"(\d{1,2})\s+([A-Za-z]{3})", closes)
+            if not m:
+                continue
+            close = next_occurrence(int(m.group(1)), month_num(m.group(2)))
+            if close < TODAY:
+                continue
+            loc = next((text(d).replace("Location:", "").strip() for d in div.select(".j-search-result__text > div")
+                        if text(d).startswith("Location:")), "")
+            dept = text(div.select_one(".j-search-result__department"))
+            org = text(div.select_one(".j-search-result__employer"))
+            body = ". ".join(x for x in (dept, loc) if x)
+            out[url] = {"title": title, "url": url, "organisation": org, "type": _opp_type(title),
+                        "closes": close.isoformat(), "body": (body + "." if body else ""), "source": "jobs.ac.uk"}
+    return sorted(out.values(), key=lambda o: o["closes"])
 
 
 SOURCES = {"NI": scrape_ni, "SRP": scrape_srp, "WiN": scrape_win,

@@ -169,7 +169,7 @@ MARK = ('<svg class="mark" viewBox="-1.3 -1.1 2.9 2.2" aria-hidden="true" focusa
 TRAIL = '<span class="trail" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
 
 NAV = [("index.html", "Home"), ("events.html", "Events"), ("conferences.html", "Conferences"),
-       ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"),
+       ("news.html", "News"), ("articles.html", "Articles"), ("opportunities.html", "Opportunities"), ("resources.html", "Resources"),
        ("partners.html", "Work with us"), ("research.html", "Research"), ("about.html", "About"), ("members.html", "Members")]
 
 sys.path.insert(0, str(HERE))
@@ -188,10 +188,16 @@ def ext(url: str) -> str:
     return ' target="_blank" rel="noopener noreferrer"' if url.startswith("http") else ""
 
 
+MAIL_ICON = ('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" '
+             'stroke-width="1.8" stroke-linejoin="round"/><path d="m3.5 6.5 8.5 7 8.5-7" fill="none" stroke="currentColor" stroke-width="1.8" '
+             'stroke-linejoin="round"/></svg>')
+
+
 def email_block(label="Email us") -> str:
+    """Our address as a mail link, with a button that copies it (mail links don't open everywhere)."""
     e = esc(CFG["email"])
-    return (f'<p class="copy"><span>{label}:</span> <a href="mailto:{e}"><code>{e}</code></a>'
-            f'<button type="button" data-copy="{e}">Copy</button></p>')
+    return (f'<p class="copy"><a class="mail" href="mailto:{e}">{MAIL_ICON}<span class="mail-addr">{e}</span></a>'
+            f'<button type="button" class="copy-btn" data-copy="{e}" aria-label="Copy the address {e}"><span>Copy</span></button></p>')
 
 
 def accounts_on() -> bool:
@@ -346,8 +352,7 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
     <div><b>Contact</b><ul>
       <li><a href="mailto:{esc(CFG['email'])}">{esc(CFG['email'])}</a></li>
       <li><a href="{root}privacy.html">Privacy</a></li><li><a href="{root}feed.xml">News feed (RSS)</a></li></ul></div>
-    <p class="legal">Events and conferences from other organisations are collected automatically from their public
-      listings each week; the details belong to them, so always check the organiser's page before booking.
+    <p class="legal">Listings from other organisations belong to them: check the organiser's page before booking.
       Updated {fmt(TODAY, False)}.</p>
   </div>
 </footer>
@@ -439,7 +444,15 @@ def own_event_row(e: dict, full: bool) -> str:
     button = (f'<a class="btn btn-navy" href="{esc(href)}"{ext(href)}>{esc(e.get("signup_label") or "Sign up")}</a>'
               if href else "")
     anchor = e.get("id") or e["slug"]
-    body = f'<div class="prose">{markdown(e["body"])}</div>' if full else f'<p class="muted">{inline(e["body"].split(chr(10))[0])}</p>'
+    paras = [x for x in re.split(r"\n\s*\n", e["body"].strip()) if x.strip()]
+    if full and len(paras) > 1:
+        rest = markdown("\n\n".join(paras[1:]))
+        body = (f'<div class="prose">{markdown(paras[0])}</div><details class="more"><summary><span>Read more</span></summary>'
+                f'<div class="prose">{rest}</div></details>')
+    elif full:
+        body = f'<div class="prose">{markdown(e["body"])}</div>'
+    else:
+        body = f'<p class="muted">{inline(e["body"].split(chr(10))[0])}</p>'
     return (f'<article class="feature" id="{esc(anchor)}"><div class="body"><span class="tag">Our event</span>'
             f'<h3>{esc(e["title"])}</h3>{body}<div class="actions">{button}</div></div>'
             f'<div class="side"><dl>{dl}</dl></div></article>')
@@ -455,7 +468,7 @@ def ext_row(e: dict, tags: str) -> str:
     place = f' data-place="{esc(e["place_key"])}"' if e.get("place_key") else ""
     keys = sorted(set(([FIELD_KEYS[e["field"]]] if e.get("field") in FIELD_KEYS else []) + interests_of(e["title"] + " " + e.get("category", ""), e["org"])))
     place += f' data-fields="{" ".join(keys)}"' if keys else ""
-    return (f'<article class="row" data-month="{month}" data-tags="{esc(tags)}"{place}>{date_box(s, f)}<div>'
+    return (f'<article class="row" data-month="{month}" data-end="{e['end']}" data-tags="{esc(tags)}"{place}>{date_box(s, f)}<div>'
             f'<h3><a href="{esc(e["url"])}"{ext(e["url"])}>{esc(e["title"])}</a></h3>'
             f'<div class="meta">{chips}<span>{span(s, f)}</span>{loc}{field}{deadline}</div></div></article>')
 
@@ -483,13 +496,13 @@ ORG_FILTERS = [("NI", "Nuclear Institute"), ("YGN", "YGN"), ("SRP", "SRP"), ("Wi
                ("IPEM", "IPEM"), ("IOP", "IOP"), ("NIA", "NIA")]
 
 
-def chips(options, label) -> str:
-    b = '<button type="button" data-value="all" aria-pressed="true">All</button>'
-    b += "".join(f'<button type="button" data-value="{esc(k)}" aria-pressed="false">{esc(v)}</button>' for k, v in options)
-    return f'<div class="chips" role="group" aria-label="{label}">{b}</div>'
+def chips(options, label, every) -> str:
+    """The filter for a list: a drop-down of the options, with "every" first."""
+    o = f'<option value="all">{esc(every)}</option>' + "".join(f'<option value="{esc(k)}">{esc(v)}</option>' for k, v in options)
+    return f'<label class="pick"><span class="small muted">{esc(label)}</span><select data-filter>{o}</select></label>'
 
 
-def build(scraped: list[dict], errors: dict):
+def build(scraped: list[dict], errors: dict, found_opps: list[dict] | None = None):
     import scrape_events as se
 
     own = load("events")
@@ -499,8 +512,10 @@ def build(scraped: list[dict], errors: dict):
                       key=lambda e: e["date"], reverse=True)
     news = sorted(load("news"), key=lambda n: n.get("date", ""), reverse=True)
     articles = sorted(load("articles"), key=lambda n: n.get("date", ""), reverse=True)
-    opps = sorted([o for o in load("opportunities") if (date_of(o.get("closes")) or dt.date.max) >= TODAY],
-                  key=lambda o: o.get("closes") or "9999")
+    ours = [o for o in load("opportunities") if (date_of(o.get("closes")) or dt.date.max) >= TODAY]
+    have = {(o.get("url") or "").rstrip("/") for o in ours}
+    found = [o for o in (found_opps or []) if o["url"].rstrip("/") not in have and date_of(o.get("closes")) and date_of(o["closes"]) >= TODAY]
+    opps = sorted(ours + found, key=lambda o: o.get("closes") or "9999")
 
     # events (membership groups) and conferences (IAEA, conference-like events, and the committee's list)
     is_conf_org = lambda e: e["org"].split(" / ")[0] in se.CONFERENCE_ORGS
@@ -558,7 +573,7 @@ def build(scraped: list[dict], errors: dict):
 
 <section class="section"><div class="wrap">
   <div class="sec-head"><h2>{TRAIL}Across the UK</h2><a href="events.html#digest">All {len(events)} events</a></div>
-  <p class="lead-in">Talks, webinars and socials from the UK's nuclear membership groups, collected every week.</p>
+  <p class="lead-in">Talks, webinars and socials from the UK's nuclear membership groups.</p>
   <div class="list">{ext_next or '<p class="empty">No upcoming events found this week.</p>'}</div>
 </div></section>
 
@@ -573,7 +588,7 @@ def build(scraped: list[dict], errors: dict):
 </div></section>
 
 <section class="band"><div class="wrap">
-  <div><h2>Could you give one talk?</h2>
+  <div><h2>{TRAIL}Could you give one talk?</h2>
     <p>Our members work across radiation detection and protection, fusion, reactor physics, materials,
       decommissioning, nuclear medicine and policy, and they'd love to hear from you. A single talk, a visit or a
       shared opportunity all help, with no commitment beyond that.</p></div>
@@ -596,8 +611,7 @@ def build(scraped: list[dict], errors: dict):
 </div></section>
 <section class="section" id="digest"><div class="wrap" data-filter-list>
   <div class="sec-head"><h2>{TRAIL}Across the UK</h2></div>
-  <p class="lead-in">Collected every Monday from the groups' own public listings. Follow each link for details and booking.</p>
-  <div class="tools">{chips([(k, v) for k, v in ORG_FILTERS if k in present], "Filter by organisation")}
+  <div class="tools">{chips([(k, v) for k, v in ORG_FILTERS if k in present], "Organisation", "All organisations")}
     <label class="search"><span class="small muted">Search</span><input type="search" data-search placeholder="Title or place"></label></div>
   <p class="count"><span data-shown>{len(events)}</span> events</p>
   {grouped(rows)}
@@ -616,21 +630,15 @@ def build(scraped: list[dict], errors: dict):
         f'<section><h3>{esc(f)}</h3><ul>' + "".join(
             f'<li><a href="{esc(s["url"])}"{ext(s["url"])}>{esc(s["name"])}</a><span>{esc(s["organiser"])}. {esc(s["what"])}</span></li>'
             for s in items) + "</ul></section>" for f, items in by_field.items())
-    cf = page_head("Conferences", "Upcoming conferences, symposia and schools across nuclear physics, medicine, radiation "
-                   "protection, fusion and energy, and a directory of the major conference series in each field.")
+    cf = page_head("Conferences", "Conferences, symposia and schools in nuclear physics, medicine, radiation protection, fusion and energy.")
     cf += f"""
 <section class="section"><div class="wrap" data-filter-list>
   <div class="sec-head"><h2>{TRAIL}Upcoming</h2></div>
-  <p class="lead-in">From the IAEA, the American Nuclear Society, the IEEE Nuclear and Plasma Sciences Society, the
-    European Physical Society, the UK groups' listings, and conferences our committee adds. IAEA technical meetings,
-    which need a nomination, are left out.</p>
   <figure class="map">{geomap.map_svg(points)}
-    <figcaption class="small muted">{sum(v[2] for v in points.values())} conferences in {len(points)} places. Select a dot to
-      see what's on there.{f" {unmapped} more are online or haven't named a place yet." if unmapped else ""}
-      Scroll, pinch or use the buttons to zoom; drag to move around. Map: Natural Earth. Places: GeoNames, via
-      Open-Meteo (CC BY 4.0).{" Facilities: Wikidata (CC0) and our own list; select one to read about it." if geomap.load_facilities() else ""}</figcaption>
+    <figcaption class="small muted">{sum(v[2] for v in points.values())} conferences in {len(points)} places: select a dot to see them.
+      Map: Natural Earth. Places: GeoNames via Open-Meteo (CC BY 4.0).{" Facilities: Wikidata (CC0)." if geomap.load_facilities() else ""}</figcaption>
     {geomap.facilities_legend()}</figure>
-  <div class="tools">{chips([(FIELD_KEYS.get(f, 'other'), f) for f in present_f], "Filter by field")}
+  <div class="tools">{chips([(FIELD_KEYS.get(f, 'other'), f) for f in present_f], "Field", "All fields")}
     <label class="search"><span class="small muted">Search</span><input type="search" data-search placeholder="Title, place or organiser"></label></div>
   <p class="place-note hidden" id="map-list" data-place-note>Showing conferences in <strong data-place-name></strong>.
     <button type="button" class="link-btn" data-place-clear>Show every place</button></p>
@@ -640,29 +648,29 @@ def build(scraped: list[dict], errors: dict):
 </div></section>
 <section class="section"><div class="wrap">
   <div class="sec-head"><h2>{TRAIL}Conference series by field</h2></div>
-  <p class="lead-in">The main recurring meetings, with a link to each organiser. Dates and calls for abstracts are on their sites.</p>
+  <p class="lead-in">The main recurring meetings in each field.</p>
   <div class="series">{directory}</div>
-  <div class="note"><p>Know a conference we've missed, or presenting at one? Tell us and we'll add it.</p>{email_block()}</div>
+  <div class="ask"><p><strong>Know a conference we've missed?</strong> Or presenting at one? Tell us and we'll add it.</p>{email_block()}</div>
 </div></section>"""
     write("conferences.html", layout("conferences.html", "Conferences", cf, "Upcoming nuclear conferences, symposia and schools by field, and the major conference series.", "conferences.html"))
 
     # ---- news and articles
     def listing(kind, items, title, intro, empty, extra=""):
         cards = "".join(post_card(i, kind) for i in items)
-        body = page_head(title, intro) + f'<section class="section"><div class="wrap"><div class="posts">{cards or f"<p class=empty>{empty}</p>"}</div></div></section>{extra}'
+        body = page_head(title, intro) + f'<section class="section"><div class="wrap">{f'<div class="posts">{cards}</div>' if cards else f'<p class="note">{empty}</p>'}</div></section>{extra}'
         write(f"{kind}.html", layout(f"{kind}.html", title, body, intro, f"{kind}.html"))
         for i in items:
             d = date_of(i.get("date"))
             by = f'<p class="byline">By {esc(i["author"])}{", " + esc(i["role"]) if i.get("role") else ""}</p>' if i.get("author") else ""
             crumb = f'<a class="crumb" href="../{kind}.html">{title}</a>'
             head = page_head(esc(i["title"]), f'{fmt(d, False) if d else ""}', crumb)
-            post = f'{head}<div class="wrap article">{by}<div class="prose">{markdown(i["body"])}</div><p><a href="../{kind}.html">Back to {title.lower()}</a></p></div>'
+            post = f'{head}<div class="wrap article">{by}<div class="prose doc">{markdown(i["body"])}</div><p><a href="../{kind}.html">Back to {title.lower()}</a></p></div>'
             write(f"{kind}/{i['slug']}.html", layout(f"{kind}/{i['slug']}.html", i["title"], post, i.get("summary", i["title"]), f"{kind}.html"))
 
     listing("news", news, "News", "What the network is doing, and nuclear news that matters to early-career researchers.", "No news yet.")
     write_for_us = f"""
 <section class="form-band" id="write"><div class="wrap">
-  <div class="form-intro"><h2>Write for us</h2>
+  <div class="form-intro"><h2>{TRAIL}Write for us</h2>
     <p>Members can write about their research, a conference or site visit, a placement, or a career path. Aim for
       600 to 1,200 words in plain language, with a picture or two if you have them. The committee reads every piece
       before it goes up and will agree any edits with you.</p></div>
@@ -670,21 +678,56 @@ def build(scraped: list[dict], errors: dict):
              "When your email app opens, attach the article (Word or PDF) and any pictures before you send it.")}
 </div></section>"""
     listing("articles", articles, "Articles", "Writing by our members: their research, visits, placements and careers.",
-            "No articles yet. Be the first: see how to write for us below.", write_for_us)
+            'No articles yet. <a href="#write">Be the first to write one</a>.', write_for_us)
 
     # ---- opportunities
     orows = "".join(
         f'<article class="row" data-tags="all">{date_box(date_of(o.get("closes")))}<div>'
         f'<h3><a href="{esc(o.get("url", ""))}"{ext(o.get("url", ""))}>{esc(o["title"])}</a></h3>'
         f'<div class="meta"><span class="org">{esc(o.get("type", "Opportunity"))}</span><span>{esc(o.get("organisation", ""))}</span>'
-        f'{f"<span>Closes {fmt(date_of(o["closes"]))}</span>" if date_of(o.get("closes")) else ""}</div>'
-        f'<p class="muted small">{inline(o["body"])}</p></div></article>' for o in opps)
-    op = page_head("Opportunities", "PhDs, jobs, placements and bursaries we think our members should hear about. Each one comes off the list after it closes.")
+        f'{f"<span>Closes {fmt(date_of(o["closes"]))}</span>" if date_of(o.get("closes")) else ""}'
+        f'{f"<span>via {esc(o["source"])}</span>" if o.get("source") else ""}</div>'
+        f'{f"<p class=\"muted small\">{inline(o["body"])}</p>" if o.get("body") else ""}</div></article>' for o in opps)
+    op = page_head("Opportunities", "PhD studentships, research posts, fellowships and placements in nuclear fields.")
     op += f"""<section class="section"><div class="wrap"><div class="list">{orows or '<p class="empty">Nothing open right now. Check back soon, or join the network to get them by email.</p>'}</div>
-  <div class="note"><p>Have an opportunity for nuclear PGRs and postdocs? Send us the details and a link.</p>{email_block()}</div></div></section>"""
+  <div class="ask"><p><strong>Have an opportunity for nuclear PGRs and postdocs?</strong> Send us the details and a link.</p>{email_block()}</div></div></section>"""
     write("opportunities.html", layout("opportunities.html", "Opportunities", op, "PhDs, jobs, placements and bursaries for nuclear researchers.", "opportunities.html"))
 
+    # ---- resources: documents that matter in the nuclear industry (content/resources.csv)
+    rpath = CONTENT / "resources.csv"
+    res = list(csv.DictReader(rpath.open(encoding="utf-8-sig"))) if rpath.exists() else []
+    groups = list(dict.fromkeys(r["group"] for r in res))
+    gkey = {g: re.sub(r"[^a-z]", "", g.lower())[:14] for g in groups}
+    rrows = []
+    for g in groups:
+        rrows.append(f'<h3 class="month" data-month-head="{gkey[g]}">{esc(g)}</h3>')
+        for r in (x for x in res if x["group"] == g):
+            yr = f'<span>{esc(r["year"])}</span>' if r.get("year") else ""
+            rrows.append(f'<article class="res" data-month="{gkey[g]}" data-tags="{gkey[g]} {esc(r["kind"].lower())}">'
+                         f'<h4><a href="{esc(r["url"])}"{ext(r["url"])}>{esc(r["title"])}</a></h4>'
+                         f'<div class="meta"><span class="org">{esc(r["kind"])}</span><span>{esc(r["publisher"])}</span>{yr}</div>'
+                         f'<p>{esc(r["what"])}</p></article>')
+    rs = page_head("Resources", "Laws, standards, strategies and data used across the nuclear industry.")
+    rs += f"""
+<section class="section"><div class="wrap" data-filter-list>
+  <div class="tools">{chips([(gkey[g], g) for g in groups], "Show", "Everything")}
+    <label class="search"><span class="small muted">Search</span><input type="search" data-search placeholder="Title or publisher"></label></div>
+  <p class="count"><span data-shown>{len(res)}</span> resources</p>
+  <div class="res-list">{"".join(rrows)}</div>
+  <p class="empty hidden" data-none>Nothing matches. Try another section or clear the search.</p>
+  <div class="ask"><p><strong>Know a document every nuclear researcher should have?</strong> Send us the link.</p>{email_block()}</div>
+</div></section>"""
+    write("resources.html", layout("resources.html", "Resources", rs, "Key laws, standards, strategies and data for the nuclear industry, with links to the official sources.", "resources.html"))
+
     # ---- join
+    ACCOUNT_ROUTE = f"""
+<section class="section"><div class="wrap"><div class="route">
+  <div><h2>Create a free account</h2>
+    <p>The easiest way to join. Keep a profile, get suggestions that follow you between devices, see member exclusives
+      such as talk recordings and slides, and choose whether to appear in the members' directory.</p></div>
+  <div class="actions"><a class="btn btn-navy" href="members.html#create">Create a free account</a>
+    <a class="btn btn-line" href="members.html">Sign in</a></div>
+</div></div></section>"""
     jn = page_head("Join the network", "Free, and open to anyone at the University of Liverpool with an interest in nuclear science and technology, whatever their department.")
     jn += f"""
 <section class="section"><div class="wrap cols">
@@ -693,19 +736,21 @@ def build(scraped: list[dict], errors: dict):
       Undergraduates and MSc students are welcome at most events, and some events are open to early-career
       professionals in industry.</p></div>
   <div><h2>{TRAIL}What you get</h2>
-    <ul class="checks"><li>Talks from industry and academic speakers on fission, fusion, decommissioning, radiation
-      protection, nuclear medicine, policy and careers</li><li>Practical workshops, from detectors to Monte Carlo
-      modelling and routes to chartership</li><li>Site visits and industry evenings with employers in the North West</li>
-      <li>A place to try out your research on people from other departments</li><li>Our summer school, events digest and
-      opportunities by email</li></ul></div>
+    <ul class="checks">
+      <li><strong>Talks.</strong> Industry and academic speakers on fission, fusion, decommissioning, radiation protection,
+        nuclear medicine, policy and careers.</li>
+      <li><strong>Workshops.</strong> Practical sessions, from detectors to Monte Carlo modelling and routes to chartership.</li>
+      <li><strong>Site visits.</strong> Visits and industry evenings with employers in the North West.</li>
+      <li><strong>An audience.</strong> A place to try out your research on people from other departments.</li>
+      <li><strong>News.</strong> Our summer school, events digest and opportunities by email.</li></ul></div>
 </div></section>
-<section class="form-band" id="signup"><div class="wrap">
-  <div class="form-intro"><h2>Sign up</h2><p>It takes under a minute. We use your details only to tell you about the
+{ACCOUNT_ROUTE if accounts_on() else ""}<section class="form-band" id="signup"><div class="wrap">
+  <div class="form-intro"><h2>{TRAIL}{"Or just join the mailing list" if accounts_on() else "Sign up"}</h2><p>It takes under a minute. We use your details only to tell you about the
     network's events and opportunities; they stay with the committee and are never shared with partners. You can leave
     at any time. See our <a href="privacy.html">privacy notice</a>.</p></div>
   {mail_form("join", "Join the network", "Full name", JOIN_FIELDS, "Write my sign-up email")}
 </div></section>
-<section class="section"><div class="wrap"><div class="prose"><p>Questions first?</p>{email_block()}</div></div></section>"""
+<section class="section"><div class="wrap"><div class="ask"><p><strong>Questions first?</strong> Ask us anything.</p>{email_block()}</div></div></section>"""
     write("join.html", layout("join.html", "Join the network", jn, "Join the Chadwick Institute Young Nuclear Network: free for nuclear researchers at Liverpool.", "join.html"))
 
     # ---- partners: flexible, one-off help is as welcome as anything longer
@@ -737,14 +782,15 @@ def build(scraped: list[dict], errors: dict):
     <p class="small muted">If you'd like to give money or equipment, it goes through the Chadwick Institute at the University of
       Liverpool so it is handled properly, and we'll agree in a short note what it's for.</p></div>
   <div><h2>{TRAIL}What we'll do in return</h2><ul class="checks">
-    <li>Thank you publicly, on this website and LinkedIn, if you'd like us to.</li>
-    <li>Introduce you to members working in your area.</li>
-    <li>Share your opportunities with people who are looking for them.</li>
-    <li>Keep members' personal details private: we never pass them on.</li>
-    <li>Stay independent: support never buys influence over research, teaching or what the network says, and we're open about who helps us.</li></ul></div>
+    <li><strong>Thanks.</strong> We'll thank you publicly, on this website and LinkedIn, if you'd like us to.</li>
+    <li><strong>Introductions.</strong> We'll introduce you to members working in your area.</li>
+    <li><strong>Reach.</strong> We'll share your opportunities with people who are looking for them.</li>
+    <li><strong>Privacy.</strong> Members' personal details stay private: we never pass them on.</li>
+    <li><strong>Independence.</strong> Support never buys influence over research, teaching or what the network says, and
+      we're open about who helps us.</li></ul></div>
 </div></section>
 <section class="form-band" id="register"><div class="wrap">
-  <div class="form-intro"><h2>Get in touch</h2><p>Tell us a little about yourself and what you'd like to do. Tick as many
+  <div class="form-intro"><h2>{TRAIL}Get in touch</h2><p>Tell us a little about yourself and what you'd like to do. Tick as many
     or as few as you like; we'll reply within a week.</p></div>
   {mail_form("partner", "Getting involved", "Organisation", PARTNER_FIELDS, "Write the email")}
 </div></section>"""
@@ -786,7 +832,7 @@ def build(scraped: list[dict], errors: dict):
     is_open = bool(CFG.get("research_open"))
     share = f"""
 <section class="form-band" id="share"><div class="wrap">
-  <div class="form-intro"><h2>Share your paper</h2><p>Members can share a paper, preprint, report or thesis chapter. Send us
+  <div class="form-intro"><h2>{TRAIL}Share your paper</h2><p>Members can share a paper, preprint, report or thesis chapter. Send us
     the details and a link (a DOI or arXiv link is best); if it isn't published anywhere, attach the file to the email.
     The committee checks each one before it goes up.</p></div>
   {mail_form("paper", "Paper for the research page", "Title", PAPER_FIELDS, "Write the email",
@@ -825,8 +871,8 @@ def build(scraped: list[dict], errors: dict):
     write("members.html", members_page())
 
     # ---- privacy and 404
-    pv = page_head("Privacy")
-    pv += f"""<section class="section"><div class="wrap"><div class="prose">
+    pv = page_head("Privacy", "What the network keeps about you, why, and how to see, change or delete it.")
+    pv += f"""<section class="section"><div class="wrap"><div class="prose doc">
   <h2>This website</h2>
   <p>This website does not use cookies, analytics or tracking of any kind, and it does not collect any personal data.
     It is hosted on GitHub Pages, which keeps standard server logs (such as IP addresses) for security; see GitHub's
@@ -871,12 +917,12 @@ def build(scraped: list[dict], errors: dict):
                       "start": d.isoformat() if d else "", "org": "Us", "region": "uk",
                       "fields": interests_of(e["title"] + " " + e["body"][:400]) + ["ours"]})
     for e in events:
-        items.append({"kind": "event", "title": e["title"], "url": e["url"], "start": e["start"], "org": e["org"],
+        items.append({"kind": "event", "title": e["title"], "url": e["url"], "start": e["start"], "end": e["end"], "org": e["org"],
                       "region": region_of("", e.get("location", "") + " " + e.get("category", "")),
                       "fields": interests_of(e["title"] + " " + e.get("category", ""), e["org"])})
     for c in confs:
         g = geo.get(c.get("location", "")) if c.get("location") else None
-        items.append({"kind": "conference", "title": c["title"], "url": c["url"], "start": c["start"], "org": c["org"],
+        items.append({"kind": "conference", "title": c["title"], "url": c["url"], "start": c["start"], "end": c.get("end") or c["start"], "org": c["org"],
                       "place": g[2] if g else c.get("location", ""),
                       "region": region_of(g[2].split(", ")[-1] if g else "", c.get("location", "")) if (g or c.get("location")) else "world",
                       "fields": sorted(set([FIELD_KEYS.get(c["field"], "")] + interests_of(c["title"], c["org"])) - {""})})
@@ -923,8 +969,7 @@ def build(scraped: list[dict], errors: dict):
   <div class="sec-head"><h2>{TRAIL}Suggested for you</h2></div>
   <div class="list" data-suggestions data-limit="20"><p class="empty">Choose a few interests above and we'll suggest things here.</p></div>
   <p class="learned" data-learned></p>
-  <p class="small muted">How it works: each suggestion matches your interests, is somewhere you'd go, and is coming up soon.
-    Nothing is sent anywhere; "Forget me" deletes it all.</p>
+  <p class="small muted">Nothing is sent anywhere. "Forget me" deletes it all.</p>
 </div></section>"""
     write("for-you.html", layout("for-you.html", "For you", fy, "Suggestions picked for your interests, kept only in your browser.", "for-you.html"))
 
@@ -1041,7 +1086,7 @@ def members_page() -> str:
 
     body = head + f"""
 <section class="section"><div class="wrap members" data-members data-url="{esc(url)}" data-key="{esc(key)}">
-  <div data-state="out">
+  <div data-state="out" class="signin-grid">
     <p class="form-msg hidden" role="status" data-out-msg></p>
     <div class="tabs" role="tablist" data-tabs>
       <button type="button" role="tab" data-tab="signin" aria-selected="true">Sign in</button>
@@ -1069,6 +1114,12 @@ def members_page() -> str:
       <div class="actions"><button class="btn btn-navy" type="submit">Create my account</button></div>
       <p class="form-msg hidden" role="status" data-msg></p>
     </form>
+    <aside class="perks"><h2>With a free account you can</h2>
+      <ul class="checks"><li><strong>Profile.</strong> Your interests and event needs, kept in one place.</li>
+        <li><strong>Suggestions.</strong> Picks for you that follow you between devices.</li>
+        <li><strong>Exclusives.</strong> Recordings, slides and opportunities for members.</li>
+        <li><strong>Directory.</strong> Find other members, and choose whether to be listed.</li></ul>
+      <p class="small muted">Free, and you can download or delete everything at any time.</p></aside>
   </div>
 
   <div data-state="recover" class="hidden">
@@ -1121,7 +1172,7 @@ def members_page() -> str:
 
 
 def committee_section() -> str:
-    """Meet the committee: the photo, then each member with their role and the relationships they look after
+    """Meet the committee: each member with their role and the relationships they look after
     (content/committee.csv: name, role, relationships separated by ;)."""
     f = CONTENT / "committee.csv"
     if not f.exists():
@@ -1131,17 +1182,11 @@ def committee_section() -> str:
         f'''<li><h3>{esc(m["name"])}</h3><p class="role">{esc(m["role"])}</p>
   <p class="small muted">Looks after</p><ul>{"".join(f"<li>{esc(x.strip())}</li>" for x in m["relationships"].split(";") if x.strip())}</ul></li>'''
         for m in people)
-    photo = ('<figure class="team-photo"><img src="images/committee.jpg" width="1600" height="1200" loading="lazy" '
-             'alt="Eight members of the network on a staircase, smiling; the one in front holds the poster for our first talk, '
-             'Radiological protection and the role of membership groups.">'
-             '<figcaption class="small muted">The network with the poster for our first talk.</figcaption></figure>'
-             if (CONTENT / "images" / "committee.jpg").exists() else "")
     return f'''<section class="section" id="committee"><div class="wrap">
   <div class="sec-head"><h2>{TRAIL}Meet the committee</h2></div>
-  <p class="lead-in">We're PhD students who wanted a place for nuclear researchers at Liverpool to meet each other and the
+  <p class="intro">We're PhD students who wanted a place for nuclear researchers at Liverpool to meet each other and the
     people they'll work with. Each of us looks after a few relationships, so if you'd like to work with one of these
     organisations, that's the person to talk to.</p>
-  {photo}
   <ul class="committee">{cards}</ul>
 </div></section>'''
 
@@ -1160,11 +1205,16 @@ def main():
     if offline and (OUT / "events.json").exists():
         data = json.loads((OUT / "events.json").read_text(encoding="utf-8"))
         scraped, errors = [e for e in data["events"] if e["end"] >= TODAY.isoformat()], {}
+        found_opps = data.get("opportunities", [])
     else:
         import scrape_events
         scraped, errors = scrape_events.collect()
         if errors and len(errors) == len(scrape_events.SOURCES):
             sys.exit("Every source failed: not publishing a site with no events")
+        try:
+            found_opps = scrape_events.scrape_opportunities()
+        except Exception as e:                                  # opportunities are extra: never block the build
+            print(f"Opportunities: {e}"); found_opps = []
     # start from a clean site/ (keeping nothing old), then the assets and pictures
     OUT.mkdir(exist_ok=True)
     for old in sorted(OUT.rglob("*"), reverse=True):   # empty site/: files first, then the folders that will let go
@@ -1177,13 +1227,13 @@ def main():
         shutil.copytree(CONTENT / "images", OUT / "images", dirs_exist_ok=True)
     (OUT / ".nojekyll").write_text("", encoding="utf-8")
     (OUT / "events.json").write_text(json.dumps(
-        {"scraped": dt.datetime.now().isoformat(timespec="minutes"), "errors": errors, "events": scraped},
+        {"scraped": dt.datetime.now().isoformat(timespec="minutes"), "errors": errors, "events": scraped, "opportunities": found_opps},
         indent=1, ensure_ascii=False), encoding="utf-8")
     with open(OUT / "events.csv", "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=["start", "end", "org", "title", "location", "category", "url"], extrasaction="ignore")
         w.writeheader()
         w.writerows(scraped)
-    build(scraped, errors)
+    build(scraped, errors, found_opps)
 
 
 if __name__ == "__main__":
