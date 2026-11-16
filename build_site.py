@@ -306,6 +306,11 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
         if not (href == "research.html" and not CFG.get("research_open"))          # hidden while locked
         and not (href == "members.html" and accounts_on()))                        # then it's the gold button
     join_href, join_label = ("members.html", "Join or sign in") if accounts_on() else ("join.html", "Join the network")
+    # Signed-in members see their profile here instead (site.js reads Supabase's saved session; no network call)
+    auth_attr = ""
+    if accounts_on():
+        ref = CFG["supabase_url"].split("//", 1)[1].split(".", 1)[0]
+        auth_attr = f' data-auth="sb-{esc(ref)}-auth-token" data-label="{esc(join_label)}"'
     full_title = f"{title} | {CFG['name']}" if title != CFG["name"] else title
     canonical = CFG["base_url"] + ("" if path == "index.html" else path)
     return f"""<!DOCTYPE html>
@@ -336,7 +341,7 @@ def layout(path: str, title: str, body: str, description: str, current: str = ""
   <div class="wrap">
     <a class="lockup" href="{root}index.html" aria-label="{esc(CFG['name'])}: home">{LOGO}<div><b>CHADWICK</b><span>YOUNG NUCLEAR NETWORK</span></div></a>
     <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
-    <nav class="nav" id="nav" aria-label="Main">{links}<a class="join" href="{root}{join_href}"{' aria-current="page"' if current == join_href else ""}>{join_label}</a></nav>
+    <nav class="nav" id="nav" aria-label="Main">{links}<a class="join" href="{root}{join_href}"{' aria-current="page"' if current == join_href else ""}{auth_attr}>{join_label}</a></nav>
   </div>
 </header>
 <main id="main">
@@ -966,10 +971,10 @@ def build(scraped: list[dict], errors: dict, found_opps: list[dict] | None = Non
       <button class="btn btn-line" type="button" data-forget>Forget me</button></div>
     <p class="small muted hidden" role="status" data-saved>Saved in this browser.</p>
   </form>
-  <div class="sec-head"><h2>{TRAIL}Suggested for you</h2></div>
-  <div class="list" data-suggestions data-limit="20"><p class="empty">Choose a few interests above and we'll suggest things here.</p></div>
+  <div class="results"><div class="sec-head"><h2>{TRAIL}Suggested for you</h2></div>
+  <div class="list" data-suggestions data-limit="20"><p class="note">Choose a few interests above and we'll suggest things here.</p></div>
   <p class="learned" data-learned></p>
-  <p class="small muted">Nothing is sent anywhere. "Forget me" deletes it all.</p>
+  <p class="small muted">Nothing is sent anywhere. "Forget me" deletes it all.</p></div>
 </div></section>"""
     write("for-you.html", layout("for-you.html", "For you", fy, "Suggestions picked for your interests, kept only in your browser.", "for-you.html"))
 

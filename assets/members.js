@@ -14,6 +14,10 @@
   var ROLE = { undergraduate: 'undergrad', msc: 'undergrad', pgr: 'pgr', postdoc: 'postdoc', staff: 'staff', industry: 'industry' };
   var profile = null, user = null;
 
+  function setMe(p) {                                          // the header shows the signed-in member's name
+    try { if (p) localStorage.setItem('ciynn-me', JSON.stringify({ name: p.full_name || p.username || '' })); else localStorage.removeItem('ciynn-me'); } catch (e) {}
+    document.dispatchEvent(new Event('ciynn-auth'));
+  }
   function say(el, text, bad) { el.textContent = text; el.classList.toggle('bad', !!bad); el.classList.remove('hidden'); }
   function show(state) { $$('[data-state]').forEach(function (s) { s.classList.toggle('hidden', s.dataset.state !== state); }); }
   function local() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -146,7 +150,7 @@
     delete data.learn_toggle;
     sb.from('profiles').update(data).eq('id', user.id).select().single().then(function (r) {
       if (r.error) { say(msg, 'Couldn’t save: ' + friendly(r.error), true); return; }
-      profile = r.data; syncForYou(profile); say(msg, 'Saved.');
+      profile = r.data; syncForYou(profile); setMe(profile); say(msg, 'Saved.');
     });
   });
 
@@ -233,6 +237,7 @@
     sb.rpc('delete_my_account').then(function (r) {
       if (r.error) { say(msg, friendly(r.error), true); return; }
       try { localStorage.removeItem(KEY); } catch (e) {}
+      setMe(null);
       sb.auth.signOut().then(function () { show('out'); say($('[data-out-msg]'), 'Your account and everything in it have been deleted.'); });
     });
   });
@@ -241,11 +246,11 @@
   function start() {
     sb.auth.getSession().then(function (r) {
       var s = r.data && r.data.session;
-      if (!s) { user = null; profile = null; show('out'); return; }
+      if (!s) { user = null; profile = null; setMe(null); show('out'); return; }
       user = s.user;
       sb.from('profiles').select('*').eq('id', user.id).single().then(function (p) {
         if (p.error) { show('out'); say($('[data-out-msg]'), 'Signed in, but your profile couldn’t be loaded. Please try again shortly.', true); return; }
-        profile = p.data; fill(profile);
+        profile = p.data; fill(profile); setMe(profile);
         var merged = syncForYou(profile);
         $('[name="learn_toggle"]', PF).checked = !!merged.learn;
         $('[data-email-now]').textContent = user.email;

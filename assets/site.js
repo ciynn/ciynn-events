@@ -1,7 +1,32 @@
 // Chadwick Institute Young Nuclear Network website: menu, list filters, search and copy buttons.
-// No tracking, no cookies, no storage, and nothing is sent anywhere.
+// No tracking, no cookies, and nothing is sent anywhere. Local storage holds only the For you choices and, for
+// members, the sign-in session that Supabase saves; this file only reads that session to show the profile button.
 (function () {
   'use strict';
+
+  // Header button: "Join or sign in" when signed out, the member's profile when signed in
+  var join = document.querySelector('.nav .join[data-auth]');
+  function paintAccount() {
+    if (!join) return;
+    var s = null, me = {};
+    try { s = JSON.parse(localStorage.getItem(join.dataset.auth)); } catch (e) {}
+    try { me = JSON.parse(localStorage.getItem('ciynn-me')) || {}; } catch (e) {}
+    var signedIn = !!(s && (s.refresh_token || (s.expires_at && s.expires_at * 1000 > Date.now())));
+    join.textContent = '';
+    join.classList.toggle('me', signedIn);
+    if (!signedIn) { join.textContent = join.dataset.label; join.removeAttribute('aria-label'); return; }
+    var meta = (s.user && s.user.user_metadata) || {};
+    var name = me.name || meta.full_name || meta.username || '';
+    var first = name.split(' ')[0] || 'My profile';
+    var initials = name.split(/\s+/).filter(Boolean).map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase() || '?';
+    var av = document.createElement('span'); av.className = 'avatar'; av.setAttribute('aria-hidden', 'true'); av.textContent = initials;
+    var lab = document.createElement('span'); lab.textContent = first;
+    join.appendChild(av); join.appendChild(lab);
+    join.setAttribute('aria-label', 'Your profile' + (name ? ' (' + name + ')' : ''));
+  }
+  paintAccount();
+  document.addEventListener('ciynn-auth', paintAccount);           // sign in or out on the members page
+  window.addEventListener('storage', paintAccount);                // or in another tab
 
   // Mobile menu
   var btn = document.querySelector('.menu-btn'), nav = document.getElementById('nav');
@@ -330,7 +355,7 @@
     lists.forEach(function (list) {
       list.textContent = '';
       if (!ready) {
-        if (list.closest('[data-foryou-page]')) list.innerHTML = '<p class="empty">Choose a few interests above and we’ll suggest things here.</p>';
+        if (list.closest('[data-foryou-page]')) list.innerHTML = '<p class="note">Choose a few interests above and we’ll suggest things here.</p>';
         return;
       }
       var learned = document.querySelector('[data-learned]');
