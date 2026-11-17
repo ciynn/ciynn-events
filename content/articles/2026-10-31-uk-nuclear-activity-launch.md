@@ -5,7 +5,7 @@ author: Marcus Turner-Wood
 role: PhD student, Nuclear Physics Cluster, University of Liverpool
 summary: Our launch, as featured in UK Nuclear Activity, the Institute of Physics Nuclear Physics Group newsletter (October 2026, Issue 159).
 ---
-*This article first appeared in [UK Nuclear Activity](http://npg.dl.ac.uk/OutreachNewsletter/index.html), the newsletter of the Institute of Physics Nuclear Physics Group, October 2026, Issue 159, edited by Jack Henderson.*
+*This article first appeared in UK Nuclear Activity, the newsletter of the Institute of Physics Nuclear Physics Group, October 2026, Issue 159, edited by Jack Henderson. [Read the full issue (PDF)](https://npg.dl.ac.uk/OutreachNewsletter/Newsletters/2026/NPActivity_October2026.pdf), or browse the [newsletter archive](https://npg.dl.ac.uk/OutreachNewsletter/index.html).*
 
 PhD researchers at the University of Liverpool have founded the Chadwick Institute Young Nuclear Network (CIYNN). It is a student-led community that connects students, postdocs and other early-career researchers in nuclear physics and related fields.
 
