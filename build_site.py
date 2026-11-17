@@ -1178,14 +1178,14 @@ def members_page() -> str:
 
 def committee_section() -> str:
     """Meet the committee: each member with their role and the relationships they look after
-    (content/committee.csv: name, role, relationships separated by ;)."""
+    (content/committee.csv: name, role, studentship, relationships separated by ;)."""
     f = CONTENT / "committee.csv"
     if not f.exists():
         return ""
     people = list(csv.DictReader(f.open(encoding="utf-8-sig")))
     cards = "".join(
         f'''<li><h3>{esc(m["name"])}</h3><p class="role">{esc(m["role"])}</p>
-  <p class="small muted">Looks after</p><ul>{"".join(f"<li>{esc(x.strip())}</li>" for x in m["relationships"].split(";") if x.strip())}</ul></li>'''
+  {f'<p class="small">{esc(m["studentship"])}</p>' if m.get("studentship") else ""}<p class="small muted">Looks after</p><ul>{"".join(f"<li>{esc(x.strip())}</li>" for x in m["relationships"].split(";") if x.strip())}</ul></li>'''
         for m in people)
     return f'''<section class="section" id="committee"><div class="wrap">
   <div class="sec-head"><h2>{TRAIL}Meet the committee</h2></div>
