@@ -1,5 +1,5 @@
-name,role,studentship,relationships
-Marcus Turner-Wood,Founder and Chair,PhD student on an STFC studentship,"Nuclear Institute and its University Network; Mentor matching"
-Sara,Events and summer school,PhD student on the RAPTOR programme,"Sellafield Ltd; British Nuclear Medicine Society (BNMS)"
-Euan,Logistics,PhD student on the RAPTOR programme,"Society for Radiological Protection (SRP), including its annual conference"
-John Webley,Marketing,PhD student on the RAPTOR programme,"UK Fusion Student Network; Our Instagram"
+name,role,studentship,bio,relationships
+Marcus Turner-Wood,Founder and Chair,PhD student on an STFC studentship,"PhD: *Mapping single-particle neutron strength and nuclear structure towards the mid-shell in semi-magic lead isotopes*. Marcus uses the ISOLDE Solenoidal Spectrometer at CERN to study neutron-adding reactions on radioactive lead beams, mapping how neutrons fill their orbitals along the lead isotopes.",Nuclear Institute and its University Network; Mentor matching
+Sara,Events and summer school,PhD student on the RAPTOR programme,"Sara's PhD research focuses on developing a Lagrangian marine transport model to predict the movement and dispersion of radioactive contaminants following an accidental release to the marine environment. The model will be used to investigate how radioactive materials can enter human exposure pathways, such as through seafood consumption and recreational use of coastal waters. The research aims to improve understanding of the potential radiological impacts on people and support decision-making during nuclear emergencies.",Sellafield Ltd; British Nuclear Medicine Society (BNMS)
+Euan,Logistics,PhD student on the RAPTOR programme,"Euan is researching selected radiological protection criteria to assess their scientific justification, proportionality to risk, and alignment with current understanding of radiation effects, whilst maintaining high standards of protection for people and the environment.","Society for Radiological Protection (SRP), including its annual conference"
+John Webley,Marketing,PhD student on the RAPTOR programme,,UK Fusion Student Network; Our Instagram
